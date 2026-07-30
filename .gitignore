@@ -1,0 +1,40 @@
+# 二进制
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 配置(含敏感信息时)
+configs/config.local.yaml
+*.env
+
+# 日志
+logs/
+*.log
+
+# 前端构建
+web-admin/node_modules/
+web-admin/dist/
+miniapp/node_modules/
+miniapp/dist/
+
+# 数据库
+*.sqlite
+*.db

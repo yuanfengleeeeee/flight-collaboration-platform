@@ -1,0 +1,30 @@
+# 航空保障智能协同平台 配置文件
+server:
+  port: 8080
+  mode: debug  # debug / release / test
+
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  username: root
+  password: "123456"
+  database: flight_collaboration
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600  # 秒
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+
+jwt:
+  secret: "change-me-in-production"
+  expire_hours: 24
+  issuer: "flight-collab"
+
+log:
+  level: info  # debug / info / warn / error
+  encoding: json  # json / console
+  output: stdout  # stdout / file

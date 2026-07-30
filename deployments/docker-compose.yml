@@ -1,0 +1,48 @@
+# 航空保障智能协同平台 - 本地开发环境
+# 使用: docker-compose up -d mysql redis
+version: "3.8"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: flight-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: flight_collaboration
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+
+  redis:
+    image: redis:7-alpine
+    container_name: flight-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  # 应用(按需启用)
+  # app:
+  #   build: .
+  #   container_name: flight-app
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - mysql
+  #     - redis
+  #   environment:
+  #     - CONFIG_PATH=/app/configs/config.yaml
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - ./configs:/app/configs
+
+volumes:
+  mysql-data:
+  redis-data:
