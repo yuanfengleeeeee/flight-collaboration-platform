@@ -16,7 +16,7 @@
 | Web 框架 | Gin | 生态最广,文档全,API 简洁 |
 | 架构形态 | 模块化单体 | 原型阶段不微服务化 |
 | 数据库 | MySQL 8.0 | 事务稳定,运维人才广 |
-| ORM | GORM | Go 主流 ORM,功能全 |
+| ORM | GORM | Go 主流 ORM,用于数据访问和模型映射 |
 | 缓存/队列 | Redis 7 | 状态缓存 + 轻量队列 |
 | 实时通信 | gorilla/websocket | 态势看板实时推送 |
 | 认证 | golang-jwt + Casbin | JWT + RBAC |
@@ -47,7 +47,7 @@
 
 **关键技术点**:
 - 架构形态:模块化单体,模块边界清晰(flight/task/event/personnel/rule/analytics/push/device/prediction/auth/common)
-- ORM:GORM(MySQL,自动迁移)
+- ORM:GORM(MySQL,数据访问) + 版本化 SQL 迁移(独立命令执行,服务启动不隐式迁移)
 - 状态机:自研轻量状态机(人员/任务/事件状态流转)
 - 规则引擎:自研轻量规则执行器(预置+阈值)
 - 定时任务:robfig/cron(超时检查、状态未知检查、统计聚合)
