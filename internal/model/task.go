@@ -8,37 +8,41 @@ import (
 
 // TaskTemplate 任务模板
 type TaskTemplate struct {
-	ID                   int64          `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
-	Name                 string         `gorm:"column:name;size:64" json:"name"`
-	Phase                string         `gorm:"column:phase;size:32;index" json:"phase"`                    // 阶段
-	RequiredPosition     string         `gorm:"column:required_position;size:64" json:"required_position"`   // 需求岗位
+	ID                    int64          `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	Name                  string         `gorm:"column:name;size:64" json:"name"`
+	Phase                 string         `gorm:"column:phase;size:32;index" json:"phase"`                   // 阶段
+	RequiredPosition      string         `gorm:"column:required_position;size:64" json:"required_position"` // 需求岗位
 	RequiredCapability    string         `gorm:"column:required_capability;size:64" json:"required_capability"`
-	RequiredCount        int            `gorm:"column:required_count;default:1" json:"required_count"`
-	TimeoutSeconds       int            `gorm:"column:timeout_seconds" json:"timeout_seconds"`
-	WarningAdvanceSeconds int           `gorm:"column:warning_advance_seconds" json:"warning_advance_seconds"`
-	Version              int            `gorm:"column:version;default:1" json:"version"`
-	Enabled              bool           `gorm:"column:enabled;default:true" json:"enabled"`
-	CreatedAt            time.Time      `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt            time.Time      `gorm:"column:updated_at" json:"updated_at"`
-	DeletedAt            gorm.DeletedAt `gorm:"column:deleted_at;index" json:"-"`
+	TriggerEventType      string         `gorm:"column:trigger_event_type;size:64;index" json:"trigger_event_type"`
+	RequiredCount         int            `gorm:"column:required_count;default:1" json:"required_count"`
+	TimeoutSeconds        int            `gorm:"column:timeout_seconds" json:"timeout_seconds"`
+	WarningAdvanceSeconds int            `gorm:"column:warning_advance_seconds" json:"warning_advance_seconds"`
+	Version               int            `gorm:"column:version;default:1" json:"version"`
+	Enabled               bool           `gorm:"column:enabled;default:true" json:"enabled"`
+	CreatedAt             time.Time      `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt             time.Time      `gorm:"column:updated_at" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"column:deleted_at;index" json:"-"`
 }
 
 func (TaskTemplate) TableName() string { return "task_template" }
 
 // TaskInstance 任务实例
 type TaskInstance struct {
-	ID           int64          `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
-	FlightID     int64          `gorm:"column:flight_id;index" json:"flight_id"`
-	TemplateID   int64          `gorm:"column:template_id;index" json:"template_id"`
-	PlannedStart time.Time      `gorm:"column:planned_start" json:"planned_start"`
-	PlannedEnd   time.Time      `gorm:"column:planned_end" json:"planned_end"`
-	ActualStart  *time.Time     `gorm:"column:actual_start" json:"actual_start,omitempty"`
-	ActualEnd    *time.Time     `gorm:"column:actual_end" json:"actual_end,omitempty"`
-	Status       string         `gorm:"column:status;size:32;index" json:"status"` // pending/ongoing/completed/cancelled/timeout
-	AssignedCount int           `gorm:"column:assigned_count;default:0" json:"assigned_count"`
-	CreatedAt    time.Time      `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt    time.Time      `gorm:"column:updated_at" json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at;index" json:"-"`
+	ID              int64          `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	FlightID        int64          `gorm:"column:flight_id;index" json:"flight_id"`
+	TemplateID      int64          `gorm:"column:template_id;index" json:"template_id"`
+	TeamID          int64          `gorm:"column:team_id;index" json:"team_id"`
+	TriggerEventID  int64          `gorm:"column:trigger_event_id;index" json:"trigger_event_id"`
+	TemplateVersion int            `gorm:"column:template_version" json:"template_version"`
+	PlannedStart    time.Time      `gorm:"column:planned_start" json:"planned_start"`
+	PlannedEnd      time.Time      `gorm:"column:planned_end" json:"planned_end"`
+	ActualStart     *time.Time     `gorm:"column:actual_start" json:"actual_start,omitempty"`
+	ActualEnd       *time.Time     `gorm:"column:actual_end" json:"actual_end,omitempty"`
+	Status          string         `gorm:"column:status;size:32;index" json:"status"` // pending/ongoing/completed/cancelled/timeout
+	AssignedCount   int            `gorm:"column:assigned_count;default:0" json:"assigned_count"`
+	CreatedAt       time.Time      `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt       time.Time      `gorm:"column:updated_at" json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at;index" json:"-"`
 }
 
 func (TaskInstance) TableName() string { return "task_instance" }
@@ -54,12 +58,19 @@ const (
 
 // TaskAssignment 任务分配
 type TaskAssignment struct {
-	ID        int64     `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
-	TaskID    int64     `gorm:"column:task_id;index" json:"task_id"`
-	UserID    int64     `gorm:"column:user_id;index" json:"user_id"`
-	Status    string    `gorm:"column:status;size:32" json:"status"` // assigned/accepted/finished
-	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at" json:"updated_at"`
+	ID              int64      `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	TaskID          int64      `gorm:"column:task_id;index" json:"task_id"`
+	UserID          int64      `gorm:"column:user_id;index" json:"user_id"`
+	Status          string     `gorm:"column:status;size:32" json:"status"` // assigned/accepted/finished
+	CandidateRank   int        `gorm:"column:candidate_rank" json:"candidate_rank"`
+	ConfirmedBy     *int64     `gorm:"column:confirmed_by" json:"confirmed_by,omitempty"`
+	ConfirmedAt     *time.Time `gorm:"column:confirmed_at" json:"confirmed_at,omitempty"`
+	AcceptedAt      *time.Time `gorm:"column:accepted_at" json:"accepted_at,omitempty"`
+	CompletedAt     *time.Time `gorm:"column:completed_at" json:"completed_at,omitempty"`
+	RejectedAt      *time.Time `gorm:"column:rejected_at" json:"rejected_at,omitempty"`
+	RejectionReason string     `gorm:"column:rejection_reason;size:255" json:"rejection_reason"`
+	CreatedAt       time.Time  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at" json:"updated_at"`
 }
 
 func (TaskAssignment) TableName() string { return "task_assignment" }

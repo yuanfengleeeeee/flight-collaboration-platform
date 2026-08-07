@@ -8,9 +8,20 @@ import (
 
 // Response 统一响应结构
 type Response struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code      int         `json:"code"`
+	Message   string      `json:"message"`
+	RequestID string      `json:"request_id,omitempty"`
+	Data      interface{} `json:"data,omitempty"`
+}
+
+// Respond 写入统一响应结构。
+func Respond(c *gin.Context, httpCode, code int, message string, data interface{}) {
+	c.JSON(httpCode, Response{
+		Code:      code,
+		Message:   message,
+		RequestID: c.GetString("request_id"),
+		Data:      data,
+	})
 }
 
 // PageResult 分页结果
@@ -23,11 +34,7 @@ type PageResult struct {
 
 // OK 成功响应
 func OK(c *gin.Context, data interface{}) {
-	c.JSON(http.StatusOK, Response{
-		Code:    0,
-		Message: "success",
-		Data:    data,
-	})
+	Respond(c, http.StatusOK, CodeSuccess, "success", data)
 }
 
 // OKPage 成功分页响应
@@ -46,27 +53,22 @@ func OKPage(c *gin.Context, list interface{}, total int64, page, size int) {
 
 // Fail 失败响应
 func Fail(c *gin.Context, code int, message string) {
-	c.JSON(http.StatusOK, Response{
-		Code:    code,
-		Message: message,
-	})
+	Respond(c, http.StatusOK, code, message, nil)
 }
 
 // FailWithHTTP 失败响应并指定 HTTP 状态码
 func FailWithHTTP(c *gin.Context, httpCode, code int, message string) {
-	c.JSON(httpCode, Response{
-		Code:    code,
-		Message: message,
-	})
+	Respond(c, httpCode, code, message, nil)
 }
 
 // 错误码常量
 const (
-	CodeSuccess        = 0
-	CodeInvalidParam   = 4001
-	CodeUnauthorized   = 4011
-	CodeForbidden      = 4031
-	CodeNotFound       = 4041
-	CodeInternalError  = 5000
-	CodePredictDisabled = 4291 // AI 预测未启用
+	CodeSuccess            = 0
+	CodeInvalidParam       = 4001
+	CodeUnauthorized       = 4011
+	CodeForbidden          = 4031
+	CodeNotFound           = 4041
+	CodeInternalError      = 5000
+	CodePredictDisabled    = 4291 // AI 预测未启用
+	CodeServiceUnavailable = 5031
 )
