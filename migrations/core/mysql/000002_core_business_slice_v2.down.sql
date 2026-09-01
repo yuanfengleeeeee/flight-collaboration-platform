@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS business_idempotency_record;
+DROP TABLE IF EXISTS personnel_status_history;
+DROP TABLE IF EXISTS task_assignment_status_history;
+DROP TABLE IF EXISTS task_assignment;
+DROP TABLE IF EXISTS task_candidate;
+DROP TABLE IF EXISTS task_status_history;
+DROP TABLE IF EXISTS task_instance;
+DROP TABLE IF EXISTS task_template;
+DROP TABLE IF EXISTS flight_status_history;
+DROP TABLE IF EXISTS flight;
+DROP TABLE IF EXISTS team_member;
+DROP TABLE IF EXISTS personnel;
+DROP TABLE IF EXISTS team;
+DROP TABLE IF EXISTS operation_area;

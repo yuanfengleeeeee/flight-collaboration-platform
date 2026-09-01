@@ -1,59 +1,50 @@
-# 设计基线
+# Architecture v2.0 设计基线
 
-> 状态：基础架构阶段，业务设计待评审冻结
->
-> 完整产品需求见根目录 `航空保障智能协同平台_PRD.md`；完整设计草案见根目录 `design-document.md`。在设计评审完成前，根目录文档是完整内容来源；本文件记录进入实现前必须遵守的设计基线。
+> 状态：Accepted / Frozen（2026-08-13）
+> 本文是已验收的 Architecture Foundation 可执行设计基线。当前已在该基线上完成 BVS2-03 `Flight → Task → Candidate` 首个 Core 业务切片；Leader Confirm、Edge Projection 和员工 Command 仍属于后续切片。
 
-## 产品目标
+## 产品与边界
 
-面向航空运输服务分公司的航班保障协同平台，目标是让正确的信息在正确时间传递给正确的人，提升航班保障协同效率。系统不替代现有运行控制、安全放行或人工决策系统。
+产品名称为航空保障智能协同平台，服务单机场。核心目标是让正确的信息在正确时间传递给正确的人。
 
-## 本期范围
+组织范围只有 `OperationArea -> Team -> Personnel`，并与 `Flight`、`Task`、`Event`、`Rule` 并列。禁止 Tenant/Airport 多租户模型、`tenant_id`、`airport_id`、airport scope 和机场切换。
 
-- 航班计划与关键动态的人工录入
-- 岗位、能力标签、人员状态和任务模型
-- 航班保障任务库与任务实例
-- 事件生命周期、规则引擎和精准通知
-- 运行态势、航班详情、岗位工作台、人员状态和运行分析
-- 软件层人员状态机；硬件感知仅预留接口
-- AI 预测接口仅保留，不调用模型、不生成预测结果
+## 架构决策
 
-## 本期非目标
+仓库是单仓库。内网 Core 是模块化单体，云端 Edge 是移动端接入服务；两者使用完全独立的 MySQL、账号、schema 和 migration。Core 是唯一业务事实源，Edge 只保存最小 Projection 与 Command 数据。
 
-- 自动配载计算
-- 自动安全放行
-- 替代运行控制或人工决策
-- 机器学习预测和自主调度
-- RFID 等硬件设备部署
-- 现有航班运行系统正式对接
+Core 与 Edge 通过版本化 Event/Command Envelope、Transactional Outbox、Inbox、幂等、Retry 和 Failed 状态同步。投递语义是 at-least-once，Core Worker 优先主动拉取 Edge Pending Commands；生产 Transport 预留 HTTPS/mTLS。
 
-## 实现前必须冻结的决定
+## 本轮范围
 
-- 航班到达/动态事件的触发来源和幂等规则
-- 任务生成时机、任务模板版本和任务取消策略
-- 班组长确认是逐任务还是批量确认
-- 人员匹配的硬约束、候选排序和冲突处理
-- 任务、人员、事件状态机及合法转换
-- 角色权限、班组数据范围和审计边界
-- 数据库迁移、初始化数据和测试数据策略
+- Core API、Edge API、Worker、Migration 入口和独立生命周期。
+- 双数据库连接、独立 SQL migration、健康检查和本地 Compose。
+- Outbox、Inbox、Command Store、Event/Command Envelope、幂等、重试和失败记录。
+- Human/Machine Principal、四角色 RBAC、结构化 Data Scope、Authorizer Port 和 Audit 基础设施。
+- request_id、trace_id、structured logging、Core/Edge/Sync OpenAPI 骨架。
+- 仅测试/开发使用的双向 Architecture Probe 与故障测试。
 
-## 当前阶段原则
+## 本轮非目标
 
-先完成主框架、模块边界、数据库、配置、认证/权限骨架、日志错误处理、测试和部署基础，并通过基础验证；之后才实现航班、任务、人员、事件等主业务逻辑。
+暂停 B3/B4/B5，不能实现真实航班、任务、人员、事件业务切片。也不实现 Kafka/RabbitMQ、Kubernetes、Service Mesh、分布式事务、复杂 CQRS/Event Sourcing、真实 AI、RFID/UWB、真实推送、SSO、完整 WebSocket、完整 PITR 或多实例生产部署。
 
-## 基础架构冻结决策（2026-08-07）
+## 设计验收条件
 
-本节只冻结进入基础实现所需的技术边界，不替代航班保障业务规则评审：
+1. Core/Edge 可独立启动并分别提供 live/ready。
+2. Core/Edge 数据库和 migration 独立，服务启动不调用 AutoMigrate。
+3. Core Transaction 可同库写业务 Probe 数据、Audit 和 Outbox。
+4. Edge Inbox 对重复 Event 幂等，Core Inbox 对重复 Command 幂等。
+5. Edge 故障、Worker 重启、Redis 故障不破坏 Core 事实和 Outbox。
+6. 双向 Probe 与对应集成/故障测试可重复运行。
+7. 文档、API 契约和代码入口不宣称当前开发环境已经达到 HA/RPO/RTO 目标。
 
-- 采用模块化单体；请求处理、业务服务、数据访问和公共能力分层，业务模块不直接修改其他模块的数据表。
-- MySQL 是业务事实来源，Redis 只承担可替换的缓存、幂等或轻量队列职责。
-- 数据库采用版本化 SQL 迁移，迁移由独立命令执行；服务启动不再隐式调用 GORM `AutoMigrate`。
-- 配置采用 YAML 基线和 `FLIGHT_` 环境变量覆盖；敏感配置不提交真实值。
-- 认证先建立 JWT、角色和权限中间件骨架；角色为管理员、值班经理、班组长、一线保障人员，业务数据范围在业务模块实现时接入。
-- 统一 request ID、结构化日志和稳定错误响应；测试分为单元、HTTP 集成和显式开启的数据库/Redis 集成测试。
+## 依赖方向
 
-## 第一个业务垂直切片（2026-08-07）
+```text
+HTTP handler -> Application service -> Domain/Port -> Repository adapter
+Core module  -> Core Application Port / shared
+Edge        -> Projection/Command store / shared
+integration -> stable business Port
+```
 
-基础层验收通过后，首个业务切片确定为“航班到达后的任务确认闭环”：航班到达事件 → 任务生成 → 候选员工匹配 → 班组长确认 → 员工接收/完成。具体状态机、幂等、权限、验收标准和数据缺口见 `memory-bank/business-slice-001.md`。
-
-该切片优先解决重复确认和电话通知问题，不引入 AI、真实推送、定位硬件或复杂自动调度。
+Handler 不调用 GORM；Service 不依赖 Gin；Domain 不依赖基础设施；模块不直接访问其他模块的表。

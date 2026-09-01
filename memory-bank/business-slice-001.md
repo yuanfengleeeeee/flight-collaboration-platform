@@ -1,8 +1,10 @@
 # 业务切片 001：航班到达后的任务确认闭环
 
-> 状态：业务设计已冻结，尚未开始代码实现
+> 状态：legacy/paused；业务设计历史材料，未作为 Architecture v2 实现入口
 >
 > 目标：减少“航班到达后已派任务，但组长仍需二次确认并电话通知员工”的重复沟通。
+
+> 当前 v2 业务切片以 [`business-slice-v2-flight-task.md`](business-slice-v2-flight-task.md) 为准；本文不再作为后续实现计划。
 
 ## 用户价值
 

@@ -67,6 +67,7 @@ const (
 	CodeInvalidParam       = 4001
 	CodeUnauthorized       = 4011
 	CodeForbidden          = 4031
+	CodeConflict           = 4091
 	CodeNotFound           = 4041
 	CodeInternalError      = 5000
 	CodePredictDisabled    = 4291 // AI 预测未启用

@@ -1,0 +1,11 @@
+.git
+.tmp
+docs
+memory-bank
+web-admin
+miniapp
+api
+migrations
+*.md
+*.err
+*.log

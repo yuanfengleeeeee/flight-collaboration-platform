@@ -1,0 +1,48 @@
+openapi: 3.0.3
+info:
+  title: Flight Collaboration Platform Sync API
+  version: 1.0.0
+  description: Machine-to-machine Core/Edge synchronization boundary; not a public business API.
+servers:
+  - url: /
+paths:
+  /events:
+    post:
+      summary: Deliver a Core event to Edge Inbox
+      responses:
+        '202': {description: Accepted or idempotently already applied}
+  /commands/pending:
+    get:
+      summary: Core pulls pending Edge commands
+      responses:
+        '200':
+          description: Pending commands with delivery attempt metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CommandRecord'
+  /commands/{commandId}/ack:
+    post:
+      summary: Acknowledge a command delivery
+      responses:
+        '204': {description: Acknowledged}
+components:
+  schemas:
+    CommandRecord:
+      type: object
+      required: [id, envelope, status, attempts, next_attempt_at, created_at]
+      properties:
+        id: {type: integer, format: int64}
+        envelope:
+          $ref: '../schemas/envelope.yaml#/components/schemas/CommandEnvelope'
+        status: {type: string}
+        attempts: {type: integer}
+        next_attempt_at: {type: string, format: date-time}
+        last_error: {type: string}
+        created_at: {type: string, format: date-time}

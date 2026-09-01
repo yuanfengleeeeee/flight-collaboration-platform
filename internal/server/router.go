@@ -7,11 +7,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	coreauth "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/auth"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/common"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/config"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/middleware"
 	authmodule "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/module/auth"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/module/device"
+	eventmodule "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/module/event"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/module/prediction"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -106,6 +108,16 @@ func SetupRouter(cfg *config.Config, db *gorm.DB, rdb *redis.Client) *gin.Engine
 		authenticated := v1.Group("/auth")
 		authenticated.Use(middleware.JWTAuth(cfg.JWT))
 		authenticated.GET("/me", authHandler.Me)
+
+		arrivalHandler := eventmodule.NewFlightArrivalHandler(
+			eventmodule.NewService(eventmodule.NewGORMRepository(db)),
+		)
+		v1.POST(
+			"/events/flight-arrived",
+			middleware.JWTAuth(cfg.JWT),
+			middleware.RequireRole(coreauth.RoleAdmin, coreauth.RoleManager),
+			arrivalHandler.RecordFlightArrived,
+		)
 
 		// 设备状态上报(预留,无需业务鉴权,后期加设备鉴权)
 		v1.POST("/device/status", device.ReportStatus)

@@ -1,0 +1,498 @@
+openapi: 3.0.3
+info:
+  title: Flight Collaboration Platform Core API
+  version: 1.0.0
+  description: Internal management and Core business boundary. Core owns business truth.
+servers:
+  - url: /
+paths:
+  /health/live:
+    get:
+      summary: Core process liveness
+      responses:
+        '200': {description: Process is alive}
+  /health/ready:
+    get:
+      summary: Core dependency readiness
+      responses:
+        '200': {description: Ready}
+        '503': {description: Required dependency unavailable}
+  /api/v1/tasks:
+    get:
+      summary: List Core tasks visible to the authenticated human principal
+      description: >
+        Core task creation is driven by the Flight arrival transaction in this
+        slice. This read endpoint supports status and flight filters with
+        server-enforced Team/Area/Assigned scope; it never accepts arbitrary
+        SQL filters.
+      operationId: listTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [awaiting_confirmation, assigned, in_progress, completed, cancelled]}
+        - name: flight_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: page
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Paginated task list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks task read permission or scope}
+        '503': {description: Authentication or Core repository unavailable}
+  /api/v1/tasks/{taskPublicID}:
+    get:
+      summary: Get a Core task with candidates and assignment
+      operationId: getTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetailResponse'
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks task read permission or scope}
+        '404': {description: Task not found or outside the principal scope}
+  /api/v1/flights/{flightPublicID}/arrival:
+    post:
+      summary: Record a flight arrival and generate its first task instance
+      description: >
+        Core owns the flight transition, task generation and candidate
+        snapshot in one transaction. Replaying the same source_event_id is
+        idempotent; Edge is not involved in this operation.
+      operationId: recordFlightArrival
+      parameters:
+        - name: flightPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlightArrivalRequest'
+      responses:
+        '201':
+          description: Arrival recorded and task generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlightArrivalResponse'
+        '200':
+          description: Duplicate arrival replay or an already-arrived flight
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlightArrivalResponse'
+        '400':
+          description: Invalid input or invalid active task template
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Flight not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Source event conflict or illegal flight transition
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: Internal processing failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /internal/sync/v1/commands/pending:
+    get:
+      summary: Pull pending Edge commands (machine boundary)
+      responses:
+         '200': {description: Commands returned}
+  /api/v1/tasks/{taskPublicID}/confirm:
+    post:
+      summary: Confirm a proposed task candidate
+      description: >
+        A human principal confirms one candidate. Core revalidates the task
+        version and current personnel facts, then atomically reserves the
+        personnel, creates the Assignment, updates candidates and task status,
+        records history and audit, and appends task.assigned.v1 to the Outbox.
+      operationId: confirmTaskCandidate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Actor-Type
+          in: header
+          required: true
+          schema: {type: string, enum: [human]}
+        - name: X-Actor-Public-ID
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Actor-Roles
+          in: header
+          required: true
+          schema: {type: string, example: leader}
+        - name: X-Actor-Team-IDs
+          in: header
+          required: false
+          schema: {type: string, example: "20"}
+        - name: X-Actor-Area-IDs
+          in: header
+          required: false
+          schema: {type: string, example: "10"}
+        - name: X-Actor-Global
+          in: header
+          required: false
+          schema: {type: boolean}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskConfirmationRequest'
+      responses:
+        '200':
+          description: Confirmation result or idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskConfirmationResponse'
+        '400':
+          description: Invalid command
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Principal is not allowed to assign in the task scope
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Task or candidate not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Stale version, already assigned, ineligible candidate, or idempotency conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/tasks/{taskPublicID}/cancel:
+    post:
+      summary: Cancel a non-terminal task
+      description: >
+        A human manager or admin may cancel a task in scope. A leader may
+        cancel only before the assigned employee accepts it. Core atomically
+        invalidates proposed candidates or releases the assignment and
+        personnel occupancy, records histories and audit, and appends
+        task.cancelled.v1 to the Outbox. Replaying cancellation_id is
+        idempotent.
+      operationId: cancelTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Actor-Type
+          in: header
+          required: true
+          schema: {type: string, enum: [human]}
+        - name: X-Actor-Public-ID
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Actor-Roles
+          in: header
+          required: true
+          schema: {type: string, example: manager}
+        - name: X-Actor-Team-IDs
+          in: header
+          required: false
+          schema: {type: string, example: "20"}
+        - name: X-Actor-Area-IDs
+          in: header
+          required: false
+          schema: {type: string, example: "10"}
+        - name: X-Actor-Global
+          in: header
+          required: false
+          schema: {type: boolean}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCancellationRequest'
+      responses:
+        '200':
+          description: Cancellation result or idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCancellationResponse'
+        '400':
+          description: Invalid command
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Principal is not allowed to cancel in the task scope
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Stale version, invalid state, or idempotency conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    FlightArrivalRequest:
+      type: object
+      required: [occurred_at, actual_arrival_at]
+      properties:
+        source_event_id:
+          type: string
+          maxLength: 128
+          description: Stable upstream event ID used as the idempotency key.
+        occurred_at:
+          type: string
+          format: date-time
+        actual_arrival_at:
+          type: string
+          format: date-time
+        source:
+          type: string
+          maxLength: 64
+          default: manual
+    FlightArrivalResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          $ref: '#/components/schemas/FlightArrivalResult'
+        request_id: {type: string}
+        trace_id: {type: string}
+    FlightArrivalResult:
+      type: object
+      required: [result_code, duplicate, flight_public_id, flight_status, candidate_count]
+      properties:
+        result_code:
+          type: string
+          enum: [created, candidate_shortage, no_active_template, already_processed]
+        duplicate: {type: boolean}
+        flight_public_id: {type: string, format: uuid}
+        flight_status: {type: string, enum: [scheduled, arrived, departed, cancelled]}
+        task_public_id: {type: string, format: uuid}
+        task_status: {type: string, enum: [awaiting_confirmation, assigned, in_progress, completed, cancelled]}
+        generation_key: {type: string}
+        candidate_count: {type: integer, minimum: 0}
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskCandidate'
+    TaskCandidate:
+      type: object
+      required: [public_id, personnel_public_id, rank, position_code, capabilities, work_state]
+      properties:
+        public_id: {type: string, format: uuid}
+        personnel_public_id: {type: string, format: uuid}
+        rank: {type: integer, minimum: 1}
+        position_code: {type: string}
+        capabilities:
+          type: array
+          items: {type: string}
+        work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+    TaskListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/TaskView'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskDetailResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/TaskView'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskView:
+      type: object
+      required: [public_id, flight_public_id, template_public_id, area_public_id, team_public_id, status, status_version, sync_version, candidates]
+      properties:
+        public_id: {type: string, format: uuid}
+        flight_public_id: {type: string, format: uuid}
+        flight_display_no: {type: string}
+        template_public_id: {type: string, format: uuid}
+        area_public_id: {type: string, format: uuid}
+        team_public_id: {type: string, format: uuid}
+        trigger_type: {type: string}
+        generation_key: {type: string}
+        source_event_id: {type: string}
+        template_version: {type: integer, minimum: 1}
+        required_position_code: {type: string}
+        required_capabilities:
+          type: array
+          items: {type: string}
+        name: {type: string}
+        message: {type: string}
+        planned_at: {type: string, format: date-time}
+        status: {type: string, enum: [awaiting_confirmation, assigned, in_progress, completed, cancelled]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        sync_version: {type: integer, format: int64, minimum: 0}
+        candidates:
+          type: array
+          items: {$ref: '#/components/schemas/TaskCandidateDetail'}
+        assignment:
+          $ref: '#/components/schemas/TaskAssignmentDetail'
+    TaskCandidateDetail:
+      allOf:
+        - $ref: '#/components/schemas/TaskCandidate'
+        - type: object
+          properties:
+            status: {type: string, enum: [proposed, selected, rejected, invalidated]}
+            matched_position_code: {type: string}
+            matched_capabilities:
+              type: array
+              items: {type: string}
+            personnel_work_state_snapshot: {type: string}
+            personnel_state_changed_at: {type: string, format: date-time}
+            rejection_reason: {type: string}
+            selected_at: {type: string, format: date-time}
+            invalidated_at: {type: string, format: date-time}
+    TaskAssignmentDetail:
+      type: object
+      required: [public_id, candidate_public_id, personnel_public_id, status, status_version, confirmation_id, confirmed_by_public_id, confirmed_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        candidate_public_id: {type: string, format: uuid}
+        personnel_public_id: {type: string, format: uuid}
+        status: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        confirmation_id: {type: string}
+        confirmed_by_public_id: {type: string, format: uuid}
+        confirmed_at: {type: string, format: date-time}
+    ErrorResponse:
+      type: object
+      required: [code, message, request_id, trace_id]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskConfirmationRequest:
+      type: object
+      required: [candidate_public_id, confirmation_id, expected_task_version]
+      properties:
+        candidate_public_id: {type: string, format: uuid}
+        confirmation_id: {type: string, maxLength: 128}
+        expected_task_version: {type: integer, format: int64, minimum: 0}
+    TaskConfirmationResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          $ref: '#/components/schemas/TaskConfirmationResult'
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskConfirmationResult:
+      type: object
+      required: [result_code, duplicate, task_public_id, candidate_public_id, task_version, sync_version]
+      properties:
+        result_code:
+          type: string
+          enum: [assigned, task_already_assigned, candidate_no_longer_eligible, forbidden, confirmation_id_conflict, stale_task_version, invalid_state, task_not_found, candidate_not_found]
+        duplicate: {type: boolean}
+        task_public_id: {type: string, format: uuid}
+        task_status: {type: string, enum: [awaiting_confirmation, assigned, in_progress, completed, cancelled]}
+        task_version: {type: integer, format: int64, minimum: 0}
+        candidate_public_id: {type: string, format: uuid}
+        assignment_public_id: {type: string, format: uuid}
+        assignment_status: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        personnel_public_id: {type: string, format: uuid}
+        personnel_work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+        sync_version: {type: integer, format: int64, minimum: 0}
+    TaskCancellationRequest:
+      type: object
+      required: [cancellation_id, expected_task_version, reason]
+      properties:
+        cancellation_id: {type: string, maxLength: 128}
+        expected_task_version: {type: integer, format: int64, minimum: 0}
+        reason: {type: string, maxLength: 255}
+    TaskCancellationResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          $ref: '#/components/schemas/TaskCancellationResult'
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskCancellationResult:
+      type: object
+      required: [result_code, duplicate, task_public_id, task_version, sync_version]
+      properties:
+        result_code:
+          type: string
+          enum: [cancelled, already_cancelled, already_completed, forbidden, cancellation_id_conflict, stale_task_version, invalid_state, task_not_found]
+        duplicate: {type: boolean}
+        task_public_id: {type: string, format: uuid}
+        task_status: {type: string, enum: [awaiting_confirmation, assigned, in_progress, completed, cancelled]}
+        task_version: {type: integer, format: int64, minimum: 0}
+        assignment_public_id: {type: string, format: uuid}
+        assignment_status: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        personnel_public_id: {type: string, format: uuid}
+        personnel_work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+        reason: {type: string}
+        sync_version: {type: integer, format: int64, minimum: 0}

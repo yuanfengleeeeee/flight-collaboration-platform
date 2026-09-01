@@ -1,4 +1,12 @@
-# 航空保障智能协同平台 设计文档
+# 航空保障智能协同平台设计文档（v2 索引）
+
+> 本文件原为 v1 草案，已不再是架构规范。Architecture v2.0 的唯一设计基线见 [`memory-bank/design-document.md`](memory-bank/design-document.md)，部署/同步/安全细节见 [`docs/architecture/architecture-v2.md`](docs/architecture/architecture-v2.md)。
+>
+> 旧草案中的单一 API/单一数据库、完整复制敏感数据、机场/租户范围、启动 AutoMigrate 或微服务化设想均已过时；与 v2 冲突的内容不适用于当前实现。Architecture Foundation 已冻结；BVS2-03 `Flight → Task → Candidate` 已在 v2 基线上实现，当前业务切片入口和冻结规则见 [`memory-bank/business-slice-v2-flight-task.md`](memory-bank/business-slice-v2-flight-task.md)。
+
+---
+
+以下保留产品需求历史草案，仅用于业务背景；不得据此绕过 Architecture v2.0 和 BVS2-01 冻结规则实现业务代码。
 
 > 版本：V1.1
 > 日期：2026-07-29

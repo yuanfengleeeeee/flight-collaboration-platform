@@ -34,10 +34,17 @@ func (Event) TableName() string { return "event" }
 // 事件类型常量
 const (
 	EventFlightChange   = "flight_change"      // 航班变化事件
+	EventFlightArrived  = "flight_arrived"     // 航班到达事件
 	EventPersonnelShort = "personnel_shortage" // 人员资源事件
 	EventTaskExecution  = "task_execution"     // 任务执行事件
 	EventPassenger      = "passenger"          // 旅客保障事件
 	EventDevice         = "device"             // 设备资源事件
+)
+
+// 事件来源常量。
+const (
+	EventSourceAuto   = "auto"
+	EventSourceManual = "manual"
 )
 
 // 事件级别

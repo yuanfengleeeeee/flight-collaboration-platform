@@ -1,0 +1,101 @@
+openapi: 3.0.3
+info:
+  title: Flight Collaboration Platform Edge API
+  version: 1.0.0
+  description: Public mobile boundary. Edge serves projections and stores commands.
+servers:
+  - url: /
+paths:
+  /health/live:
+    get:
+      summary: Edge process liveness
+      responses:
+        '200': {description: Process is alive}
+  /health/ready:
+    get:
+      summary: Edge dependency readiness
+      responses:
+        '200': {description: Ready}
+        '503': {description: Required dependency unavailable}
+  /api/v1/tasks:
+    get:
+      summary: Read the caller's task projection
+      description: Reads only the Edge projection filtered by X-Employee-Public-ID.
+      parameters:
+        - name: X-Employee-Public-ID
+          in: header
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        '200': {description: Projection returned}
+        '503': {description: Projection store unavailable}
+  /api/v1/tasks/{taskPublicID}/accept:
+    post:
+      summary: Queue an employee task acceptance command
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Employee-Public-ID
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmployeeTaskCommandRequest'}
+      responses:
+        '202': {description: Command persisted as pending}
+        '400': {description: Invalid command}
+  /api/v1/tasks/{taskPublicID}/complete:
+    post:
+      summary: Queue an employee task completion command
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Employee-Public-ID
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmployeeTaskCommandRequest'}
+      responses:
+        '202': {description: Command persisted as pending}
+        '400': {description: Invalid command}
+  /api/v1/commands:
+    post:
+      summary: Store a versioned mobile command for Core
+      responses:
+        '202': {description: Command accepted for synchronization}
+  /internal/sync/v1/events:
+    post:
+      summary: Apply a Core event to Edge Inbox and Projection
+      responses:
+        '202': {description: Event accepted or duplicate}
+  /internal/sync/v1/commands/pending:
+    get:
+      summary: Pull pending Edge commands for the Core Worker
+      responses:
+        '200': {description: Pending commands returned}
+  /internal/sync/v1/commands/{commandID}/ack:
+    post:
+      summary: Acknowledge a Core Worker command result
+      responses:
+        '204': {description: Command acknowledgement persisted}
+components:
+  schemas:
+    EmployeeTaskCommandRequest:
+      type: object
+      required: [assignment_public_id, expected_sync_version]
+      properties:
+        assignment_public_id: {type: string, format: uuid}
+        expected_sync_version: {type: integer, format: int64, minimum: 1}
+        client_occurred_at: {type: string, format: date-time}
+        note: {type: string, maxLength: 255}

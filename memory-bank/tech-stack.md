@@ -1,50 +1,27 @@
-# 技术栈基线
+# Architecture v2.0 技术栈
 
-> 来源：根目录 `tech-stack.md`。当前只固化基础设施方向；具体版本和实现细节以验证结果为准。
+> 状态：Accepted / Frozen（架构基线）；技术实现状态更新于 2026-09-01
 
-## 基础选型
+| 层 | 选择 | 边界 |
+|---|---|---|
+| 运行时 | Go 1.25.1 | `core-api`、`edge-api`、`worker`、`migrate` 共用单仓库模块；Core 仍是模块化单体 |
+| HTTP | Gin 1.12.0 + 标准 `net/http` | Core、Edge、Sync 路由分离；业务 Service 不依赖 Gin |
+| 持久化 | MySQL 8.0 + GORM 1.31.2/`database/sql` | Core/Edge 两个独立实例；事实数据和可靠同步记录只落 MySQL |
+| Redis | `go-redis/v9` 9.21.0，可选 | cache、限流、短锁、在线状态和临时去重；不承担事实或可靠同步 |
+| 配置 | Viper + YAML + `FLIGHT_` 环境覆盖 | 示例配置可提交；真实凭据只来自环境/未来 Secret Manager |
+| 日志 | Zap 1.28.0 | 结构化字段，包含 request_id/trace_id；禁止敏感凭据 |
+| 认证 | `golang-jwt/jwt/v5` 5.3.1 | JWT 只含身份/会话声明；Human/Machine Principal 分离；正式入口接线仍需收口 |
+| 授权 | RBAC + 结构化 AccessScope | 角色 admin/manager/leader/staff；Scope 为 global/area/team/assigned/self |
+| 迁移 | 版本化 SQL + 独立 migrate 命令 | `migrations/core/mysql` 与 `migrations/edge/mysql` 分开；禁止启动 AutoMigrate |
+| 同步 | Transactional Outbox + Inbox + Command Store | at-least-once、幂等、重试、失败记录；暂不引入 Kafka/RabbitMQ |
+| 测试 | Go unit/HTTP/integration test | Probe 默认可在内存 fake 运行；数据库测试显式配置，不清空用户数据 |
+| 部署 | Docker Compose 本地 | `core-api`、`edge-api`、`worker`、`core-mysql`、`edge-mysql`；Redis profile 可选 |
+| 前端 | `frontend/` 工作区目录骨架已创建 | `admin-web`/`employee-web` 及共享包目录已落地；React + TypeScript + Vite + pnpm workspace 为 `PROPOSED`，前端只能通过 API 访问数据 |
 
-- 后端：Go + Gin
-- 架构：模块化单体，先保持单仓和清晰模块边界，不提前拆微服务
-- 数据库：MySQL，作为核心业务数据唯一事实来源
-- ORM：GORM；仅用于数据访问和模型映射，不在服务启动时执行隐式迁移
-- 迁移：版本化 SQL 文件，使用独立迁移命令执行；服务启动只检查数据库连接和迁移状态
-- 缓存/轻量队列：Redis，可选依赖，不能让核心数据一致性依赖 Redis
-- 认证：JWT；角色和资源权限需要形成独立中间件/服务边界
-- 配置：Viper + 环境变量；敏感配置不得硬编码
-- 日志：Zap，统一结构化日志
-- 部署：Docker Compose 作为本地开发和基础验证环境
-- 测试：Go 单元测试、HTTP 集成测试、数据库迁移验证
-- AI：当前只保留 prediction 接口桩，不进入本期实现
+## 未来 Port（本轮禁用）
 
-## 基础阶段冻结决策（2026-08-07）
+`NotificationSender`、`PushSender`、`FlightDataSource`、`DeviceObservationPort`、`Predictor`、SSO/IdentityProvider、Transport/mTLS、Metrics/Tracing。当前使用 Noop/InApp/Disabled Adapter，不引入真实外部账号、硬件或模型。
 
-- 模块依赖方向固定为：HTTP handler → module service → repository/store；公共能力只能向下被依赖，业务模块不直接依赖其他业务模块的数据库实现。
-- MySQL 保存业务事实、状态和审计所需数据；Redis 只用于缓存、幂等键或可替换的轻量队列，Redis 不可用时核心写入仍必须保持可解释。
-- 数据库使用 `migrations/mysql/` 的递增版本 SQL；迁移命令单独运行，服务进程不再调用 `AutoMigrate`。
-- 配置采用 YAML 基线 + `FLIGHT_` 前缀环境变量覆盖，敏感值优先从环境变量读取；本地 Compose 的 MySQL 宿主机端口由 `MYSQL_HOST_PORT` 覆盖。
-- 认证采用 Bearer JWT；角色先保留 `admin`、`manager`、`leader`、`staff`，权限检查通过独立中间件/服务接口，业务资源数据范围在后续模块中接入。
-- 错误响应统一包含稳定错误码、用户可读消息和 request ID；日志使用 Zap 结构化输出，禁止密码、JWT secret 和完整 token 进入日志。
-- 测试分为纯单元测试、HTTP `httptest` 集成测试和显式开启的 MySQL/Redis 集成测试；默认测试不得清空用户已有数据库。
+## 非选择
 
-## 目标模块边界
-
-```text
-cmd/server          程序入口与生命周期
-internal/config     配置加载与校验
-internal/server     HTTP 服务、路由、依赖装配
-internal/middleware 日志、恢复、CORS、认证、权限
-internal/store      MySQL/Redis 连接与生命周期
-internal/model      持久化模型
-internal/common     响应、错误、审计和公共能力
-internal/module     后续业务模块
-deployments         本地依赖和部署定义
-```
-
-## 基础阶段不做的事情
-
-- 不新增业务规则和复杂状态流转
-- 不扩展航班、任务、事件 API
-- 不接入 AI 模型
-- 不接入真实推送渠道
-- 不以“能启动”替代迁移、权限、测试和依赖验证
+本轮不引入微服务拆分、Kubernetes、Service Mesh、Kafka、RabbitMQ、分布式事务、ClickHouse、Spark、Flink、Model Registry、Feature Store、GPU Service 或完整监控平台。

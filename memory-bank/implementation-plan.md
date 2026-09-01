@@ -1,85 +1,126 @@
-# 基础架构实施计划
+# Architecture v2.0 Foundation 实施计划
 
-> 本计划只覆盖进入主业务逻辑前的基础阶段。每一步完成并验证后，才进入下一步；本文件不写实现代码。
+> A1-A10 已于 2026-08-13 完成并验收；Architecture Foundation 状态为 Accepted / Frozen。本计划不包含真实 B3-B5 业务，后续业务实施需另行建立计划。
 
-## Step 1：工具链与基线检查
+## A1 Repository Audit
 
-目标：确认 Go、Docker、Git 和项目依赖的可用性，记录当前实际失败点。
+核对 git root、branch、remote、status、diff、untracked、现有目录、migration、测试、配置和运行依赖；建立 KEEP/REFACTOR/REWRITE/REMOVE 清单，保留已有修改。
 
-验证：执行 `go version`、`go test ./...`、`go build ./cmd/server`；检查 Docker Compose 配置语法。任何工具不可用都记录为阻塞，不得假设通过。
+验证：审计结果与实际命令输出一致，旧 HANDOFF 的矛盾被记录。
 
-## Step 2：冻结基础架构决策
+## A2 Documentation Freeze
 
-目标：确认模块边界、MySQL/Redis 职责、配置来源、迁移策略、认证权限边界、日志错误规范和测试分层。
+建立 `docs/architecture/architecture-v2.md`、8 个 Accepted ADR，并同步设计、技术栈、实施计划、进度、架构记录、AGENTS、HANDOFF、README；明确单机场、Core/Edge 数据所有权和 B3 暂停。
 
-验证：架构记录、技术栈基线和根目录设计文档之间没有未记录的冲突；关键决定有明确结论。
+验证：规范文档之间没有共享数据库、AutoMigrate、多租户或微服务冲突；旧文档已明确过时/非规范。
 
-## Step 3：整理程序骨架与生命周期
+## A3 Repository Restructure
 
-目标：统一入口、依赖装配、启动顺序、优雅关闭、健康检查和错误退出策略；不实现业务流程。
+建立 `cmd/core-api`、`cmd/edge-api`、`cmd/worker`、`internal/core`、`internal/edge`、`internal/integration`、`internal/platform`、`internal/shared`、`api/{core,edge,sync,schemas}` 和新部署目录。旧 B1/B2/B3 现场不覆盖，暂标为 legacy/paused。
 
-验证：无数据库/Redis 时行为符合约定；依赖连接和关闭路径可测试；健康检查能准确反映服务和依赖状态。
+验证：新入口的 import 方向清晰；Core/Edge/Integration 不共享业务表；`go list ./...` 可解析。
 
-## Step 4：确定数据库基础方案
+## A4 Dual Database Foundation
 
-目标：确定数据库命名、字符集、时区、连接池、迁移目录/版本规则、初始化数据和测试数据库策略。
+为 Core/Edge 分别建立 MySQL 配置、连接池、schema migration runner 和 `000001_*_foundation` up/down SQL；Compose 用两个容器隔离，Redis 只设 optional profile。
 
-验证：空数据库可按顺序完成迁移；重复执行不会产生不可控差异；迁移状态可查询；数据库连接失败能明确报告。
+验证：Core/Edge migration 可分别在空库 status/up；服务启动不包含 `AutoMigrate`；不执行破坏性 down 或清理用户 volume。
 
-## Step 5：统一配置、日志和错误处理
+## A5 Core / Edge Application
 
-目标：建立配置校验、环境变量覆盖、敏感配置管理、结构化日志、请求追踪字段、统一错误响应和审计接口骨架。
+实现 Core API、Edge API、Worker 独立生命周期、配置、structured logging、request_id/trace_id、live/ready、优雅关闭和必要依赖检查。Core/Edge API 不依赖对方数据库。
 
-验证：开发/测试配置可切换；缺失必填配置会失败并给出明确原因；HTTP 错误格式稳定；日志不泄露密码、JWT 密钥等敏感信息。
+验证：两个 API 可独立启动；live 不依赖数据库；ready 只把必要 MySQL 作为硬依赖，Redis 故障不让核心一致性失效。
 
-## Step 6：认证与权限骨架
+## A6 Sync Infrastructure
 
-目标：建立登录会话、JWT 校验、角色权限中间件和数据范围接口；暂不实现业务资源的完整授权逻辑。
+实现 Event/Command Envelope、Outbox、Inbox、Command Store、幂等键、pending/retry/failed 状态、退避和错误记录；封装 Core→Edge Transport 与 Core 主动拉取 Edge Command。
 
-验证：未认证请求被拒绝；角色不匹配请求被拒绝；测试能覆盖 token 过期、无效签名和越权路径。
+验证：重复 Event/Command 只产生一次最终效果；Outbox 在 Worker 退出后可继续；Edge 不可用不回滚 Core 事务；无 Redis 仍可同步。
 
-## Step 7：测试与本地部署骨架
+## A7 IAM Foundation
 
-目标：建立单元测试、HTTP 集成测试、迁移测试、测试夹具和 Docker Compose 本地依赖启动方式。
+实现 Human/Machine Principal、四角色、`resource:action` Permission、结构化 AccessScope、IdentityProvider/Authenticator/Authorizer Port 和 Audit record。JWT 不保存完整权限列表。
 
-验证：基础测试可重复运行；MySQL/Redis 本地依赖可启动、可连接、可清理；服务能在干净环境构建和启动。
+验证：未认证/无权限/越权路径可测试；Scope 通过参数化过滤对象传递；设备身份不能伪装普通 staff。
 
-## Step 8：基础层验收门
+## A8 Architecture Probe
 
-目标：确认基础层已经足够稳定，再批准第一个业务垂直切片。
+建立 test-only/dev-only Core test event→Outbox→Worker→Edge Inbox→Projection→Edge API，以及 Edge command→Command Store→Core pull→Core Inbox→Core transaction→Outbox→Projection 的双向验证。
 
-验收：启动、构建、迁移、健康检查、认证、权限、日志、错误处理、基础测试和本地部署全部有实际结果；未通过项进入 `progress.md` 和 `HANDOFF.md`。
+验证：Probe 不注册为生产公开业务接口；端到端测试可重复运行并检查公共 ID、版本、trace/correlation。
 
-## 后续业务阶段（基础层通过后）
+## A9 Failure Tests
 
-业务实现从 `memory-bank/business-slice-001.md` 开始，严格按以下单步执行：
+覆盖重复 Event、重复 Command、Edge 暂不可用、重试、Worker 中途退出并重启、Redis 不可用、Projection 延迟和 failed 状态。
 
-## 业务 Step B1：补齐切片数据结构
+验证：每种故障有自动测试或可重复命令；文档只记录实际运行结果。
 
-目标：新增班组、班组成员、到达事件幂等、通知和任务/分配审计所需的数据结构，保持迁移可追踪；不实现业务 API。
+## A10 Final Verification（已完成）
 
-验证：空测试库可完成新迁移；唯一约束、状态字段和索引符合切片文档；`go test ./...` 通过。
+运行 `gofmt`、`go test ./...`、`go build ./...`、`git diff --check`、`git status`；Docker 可用时运行 Compose config、双库 migration、Core/Edge health 和 Probe。不可用时记录真实错误。
 
-## 业务 Step B2：准备隔离测试夹具
+验证：更新 `memory-bank/progress.md`、`memory-bank/architecture.md`、`HANDOFF.md`，不宣称未运行的检查通过。
 
-目标：建立班组、岗位能力、员工、航班和单个任务模板的测试夹具，不创建默认生产账号。
+实际结果：Docker Engine、Compose 配置、Core/Edge 双 MySQL migration、四个健康检查、双向容器 Probe、重复消息幂等、Worker 重启恢复、Edge 不可用重试恢复，以及 `go test ./...`、`go build ./...`、`git diff --check` 均已实际通过。v2 Foundation 现已冻结，不继续增加架构功能。
 
-验证：夹具可重复创建和清理，不影响开发数据库；候选筛选测试数据可表达合格、不合格和冲突员工。
+## Phase 2 Business Implementation
 
-## 业务 Step B3：实现到达事件与任务生成
+> 状态：BVS2-01 FROZEN / BVS2-02 COMPLETED / BVS2-03 COMPLETED / BVS2-04 COMPLETED / BVS2-05 COMPLETED / BVS2-06 COMPLETED（当前冻结范围）
+> 当前后端边界：BVS2-06 冻结范围已完成；手工 Task 创建、任意 PATCH、硬删除和完整生产身份体系仍需单独冻结契约。
+> 业务实现必须适应 Architecture v2.0，不得为业务便利修改已冻结的 Core/Edge、双数据库、Outbox/Inbox、Principal、RBAC/Scope 或 Migration 边界。
 
-目标：实现人工/测试触发的 `flight_arrived` 事件、幂等处理和任务实例生成。
+业务切片的唯一当前入口为 [`memory-bank/business-slice-v2-flight-task.md`](business-slice-v2-flight-task.md)。旧 `business-slice-001.md`、旧 B3 目录和旧业务路由均为 legacy/paused，不得直接恢复。
 
-验证：重复事件不重复生成任务；模板版本被保存；非法航班或模板返回稳定错误。
+Phase 2 的执行顺序为：
 
-## 业务 Step B4：实现候选匹配与组长确认
+1. `BVS2-01` 业务设计冻结：`FROZEN`。六组设计交付物和 BVS2-AT-01 至 BVS2-AT-30 已冻结；本步骤只改文档，不写业务代码。
+2. `BVS2-02` Core 数据与迁移：`COMPLETED`。已建立已冻结业务事实、状态历史和业务幂等结果记录；Core 容器数据库已执行 `000002_core_business_slice_v2`，Edge 仍只有独立 Foundation migration。
+3. `BVS2-03` Flight → Task → Candidate：`COMPLETED`。已实现 Flight 到达 Application Use Case、任务生成幂等、模板快照、Candidate 确定性筛选、同事务 Audit/Outbox 和 Core API 入口；内存单元测试与隔离 Docker Core MySQL 集成测试均已覆盖。
+4. `BVS2-04` Leader Confirm：`COMPLETED`。已实现 Human Principal + Area/Team Scope、任务版本与候选复核、Personnel reserved、Assignment、状态历史、Audit、`task.assigned.v1` Outbox 和 `confirmation_id` 业务幂等；内存与隔离 Core MySQL 验收均已覆盖。
+5. `BVS2-05` Edge Projection → Employee Command：`COMPLETED`。代码、Edge migration、隔离数据库验证和员工命令状态机均已完成。
+6. `BVS2-06` 完整闭环验收：`COMPLETED`（当前冻结范围）。已完成 Compose 双向闭环、JWT/mTLS 入口、Task 查询/生命周期操作以及重复、越权、非法状态和恢复路径验证。
 
-目标：按班组、岗位能力、空闲状态筛选候选人，提供组长逐任务确认/拒绝接口。
+当前 `BVS2-01` 至 `BVS2-06` 均已完成当前冻结范围；后续转入前端 F0 设计冻结和产品化待办收敛。
 
-验证：硬约束和越权路径有测试；并发确认不会产生多个有效分配；确认前不通知员工。
+## BVS2-04 Leader Confirm（2026-08-31）
 
-## 业务 Step B5：实现员工接收与完成
+- 已实现 `ConfirmationService` 与独立 `ConfirmationRepository` Port；确认命令不扩大 BVS2-03 Arrival 的既有接口，Core Service 不依赖 Gin/GORM。
+- 成功路径在一个 Core MySQL transaction 内完成：锁定并校验 Task `awaiting_confirmation + expected_task_version`，复核 Candidate 与当前 Personnel 的 Team/Area、岗位、能力、启用、`idle` 和计划时间冲突，调用保留状态变更，创建 `confirmed` Assignment，选中一个 Candidate、拒绝其他候选，将 Task 变为 `assigned`，写入 Task/Assignment/Personnel History、Audit 与 `task.assigned.v1` Outbox。
+- `confirmation_id` 是业务幂等键；同 ID 同内容重放原结果且不重复副作用，不同内容返回 `confirmation_id_conflict`。任务已分配、版本过期、权限范围不符和候选人失效均有稳定结果码；候选人失效会在同一事务内标记 `invalidated`，不会生成半成品 Assignment。
+- Core API 新增 `POST /api/v1/tasks/{taskPublicID}/confirm`。当前 v2 内部入口支持由认证中间件注入 Principal，也保留 `X-Actor-*` 测试适配；正式 JWT 中间件接线仍属于后续入口收敛，不改变 Application 层 Human Principal 校验。
+- 验证结果：`go test ./...`、`go build ./...`、`git diff --check` 通过；临时内存卷 Core MySQL 完成 Core migration 后，`FLIGHT_RUN_BVS2_DB_TEST=1 go test ./internal/core/adapter/mysql -run TestFlightTaskSQLAgainstDocker -count=1 -v` 通过。原 `local_core_mysql_data` 数据卷检测为 InnoDB 损坏，未执行删除或重置；集成验证使用可清理的内存临时容器。
 
-目标：实现员工查看本人通知、接收任务、开始和完成任务，更新任务/人员状态。
+## BVS2-05 Edge Projection → Employee Command（2026-09-01，代码与隔离数据库验证已完成）
 
-验证：员工只能操作自己的任务；非法状态转换被拒绝；任务完成后状态和审计记录一致。
+- Edge `TaskProjection` 新增 `assignment_public_id` 与 `business_status` 语义；`task.assigned.v1`、`task.accepted.v1`、`task.completed.v1`、`task.cancelled.v1` 均按 Core 最小快照投影。
+- Edge Projection 按 `sync_version` 收敛：旧版本忽略、同版本同内容幂等、同版本不同内容返回 `projection_version_conflict`；新增 Edge `000002_edge_business_slice_v2` migration 保存 Assignment ID。
+- Edge 新增 `POST /api/v1/tasks/{taskPublicID}/accept` 与 `/complete`，只从 `X-Employee-Public-ID` 生成命令 Actor，先持久化 Command 再异步交给 Core Worker。
+- Core 新增员工命令处理：校验本人 Assignment、`task:accept`/`task:complete`、状态和 Projection 版本；Accept/Complete 在同一 Core MySQL transaction 内更新 Task、Assignment、Personnel，写三类 History、Audit 和对应 Outbox Event。
+- Worker 新增可插拔 CommandProcessor；生产 Core MySQL 使用业务 Repository 的同事务 Core Inbox，Foundation Probe 仍保留。业务拒绝标记为终态失败，不进入无意义重试。
+- Core/Edge 的 Command 幂等比较使用 JSON 语义等价判断，兼容 MySQL JSON 列自动规范化对象键顺序；同 command ID 的不同业务内容仍返回冲突。
+- 已实际通过定向 Go 测试：`go test ./internal/edge/... ./internal/core/application/... ./internal/core/adapter/mysql ./internal/core/module/iam ./internal/integration/sync ./cmd/worker/...`。
+- 已在隔离临时 Edge MySQL 应用两个 migration，并通过 `FLIGHT_RUN_BVS2_EDGE_DB_TEST=1` Projection 版本收敛/冲突 SQL 测试；Edge `000001`、`000002` 均为 `applied`。
+- 已在隔离临时 Core MySQL 应用 `000001`、`000002` 后通过 `FLIGHT_RUN_BVS2_DB_TEST=1 go test ./internal/core/adapter/mysql -run TestFlightTaskSQLAgainstDocker -count=1 -v`，覆盖 Accept→Complete 原子状态转换、Core Inbox 幂等、三类 History、Audit 与 Outbox。
+- `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all` 已通过：Docker 前置、`go test ./...`、`go build ./...`、Compose config 和 `git diff --check` 均通过。临时容器已停止并清理；原有数据卷未删除/重置。
+
+## Cross-cutting Project Memory and Docker Preflight（已完成，2026-08-31）
+
+- 新增 `memory-bank/project-memory.md`，保存跨会话长期约束；`progress.md` 和 `HANDOFF.md` 继续保存执行进度和交接状态。
+- 新增 `scripts/ensure-docker.ps1`，在功能、集成、数据库或 Compose 验证前检查 Docker Engine；未就绪时启动 Docker Desktop 并等待就绪。
+- 新增 `scripts/verify.ps1`，统一执行 Docker 前置检查，以及 Go 测试、构建、Compose 配置和 `git diff --check` 等分项验证。
+- 该机制不自动启动项目容器、不执行 Migration、不删除 Volume、不清空数据库；这些动作仍需按项目规则显式执行。
+## BVS2-06 Task Cancel（2026-09-01，首个闭环已完成）
+
+- 已实现 Core 管理取消用例：POST /api/v1/tasks/{taskPublicID}/cancel，输入 cancellation_id、expected_task_version、reason。
+- Human admin/manager/leader 受 task:cancel 与 Task Team/Area Scope 约束；leader 只能在员工 Accept 前取消，staff 和 machine 不可执行。
+- awaiting_confirmation 会在同一 Core transaction 内使全部 proposed Candidate 失效；assigned/in_progress 会同步取消 Assignment 并释放 Personnel；completed/cancelled 不产生新的业务状态副作用。
+- 事务同时写 Task/Assignment/Personnel History、Audit、业务幂等记录和 task.cancelled.v1 Outbox；同 cancellation_id 重放返回原结果，不同内容返回 cancellation_id_conflict。长取消 ID 的事件 CorrelationID 使用稳定派生 UUID 以兼容现有 CHAR(36) schema。
+- 已通过取消服务单元测试、Core/HTTP 相关包回归测试，以及独立 Docker Core MySQL migration 后的 TestTaskCancellationSQLAgainstDocker。
+
+当前正式任务仍为 BVS2-06：还需完成完整 Compose 服务闭环、正式 JWT/mTLS 接线、Task CRUD 和全链路异常恢复验收。
+## 2026-09-01 BVS2-06 implementation update
+
+- Compose full-chain and physical recovery acceptance is complete on the isolated `bvs206-closure` project; Docker Hub base-image EOF remains an environment limitation for normal `up --build`.
+- Formal JWT/mTLS entry wiring is complete for Core management routes, Edge employee routes, and Worker-to-Edge transport. Local Compose deliberately keeps TLS disabled and development actor headers explicitly enabled.
+- Task CRUD is delivered within the frozen semantics: Core list/detail reads with RBAC/scope, Arrival as create, Confirm/Cancel as lifecycle mutations. Generic manual create, arbitrary PATCH, and hard delete remain blocked until their business contract is frozen.

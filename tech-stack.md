@@ -1,128 +1,106 @@
-# 技术栈选型
+# 技术栈基线（Architecture v2）
 
-> 版本：V2.0
-> 日期：2026-07-29
-> 依据：`design-document.md` V1.1
-> 决策：采用 Go 技术栈搭建原型(用户决策)
-> 备选论证：详见 `tech-selection-report.md`(Java 方案,作为未来企业扩展参考)
+> 状态：当前 v2 技术基线
+> 更新时间：2026-09-01
+> 规范来源：memory-bank/tech-stack.md、memory-bank/architecture.md、docs/architecture/architecture-v2.md、实际 Go 代码和 Migration
 
----
+本文件是根目录索引。完整技术边界以 memory-bank/tech-stack.md 为准；本文件不保留早期候选方案。
 
-## 0. 选型总览(Go 原型方案)
+## 1. 当前技术栈
 
-| 层 | 选型 | 理由 |
-|----|------|------|
-| 后端语言 | Go 1.22+ | 用户决策,原型快速搭建 |
-| Web 框架 | Gin | 生态最广,文档全,API 简洁 |
-| 架构形态 | 模块化单体 | 原型阶段不微服务化 |
-| 数据库 | MySQL 8.0 | 事务稳定,运维人才广 |
-| ORM | GORM | Go 主流 ORM,用于数据访问和模型映射 |
-| 缓存/队列 | Redis 7 | 状态缓存 + 轻量队列 |
-| 实时通信 | gorilla/websocket | 态势看板实时推送 |
-| 认证 | golang-jwt + Casbin | JWT + RBAC |
-| Web 管理端 | Vue 3 + TypeScript + Element Plus | 中后台最低成本 |
-| 移动端 | 微信小程序(原生) | 免安装、对接企业微信 |
-| 图表 | ECharts | 免费、强大 |
-| 配置 | viper + 环境变量 | Go 标准 |
-| 日志 | zap | 高性能结构化日志 |
-| 部署 | Docker Compose + Nginx | 轻量部署 |
-| CI/CD | GitHub Actions(self-hosted runner) | 已有仓库 |
-| 监控 | prometheus/client_golang + Grafana | 免费、标准 |
-| AI 预测 | 本期 Go 桩 → 未来 Python 微服务 | 接口预留 |
-| 硬件接口 | 设备状态上报 API(MQTT/HTTP) | RFID/UWB 预留 |
+| 层 | 选型 | 当前状态 |
+| --- | --- | --- |
+| 后端语言 | Go 1.25.1 | 已在 go.mod 和 v2 入口中使用 |
+| HTTP | Gin 1.12.0 + 标准 net/http | Core、Edge 已使用 |
+| ORM/数据库访问 | GORM 1.31.2 + database/sql | Core/Edge Repository 使用 |
+| 数据库 | MySQL 8.0 | Core/Edge 独立实例和 schema |
+| Migration | 版本化 SQL + cmd/migrate | Core/Edge 目录独立 |
+| 缓存 | go-redis/v9 9.21.0，可选 | Redis 不承担可靠一致性 |
+| 同步 | HTTP Transport + Outbox + Inbox + Command Store | at-least-once、幂等、重试、失败记录 |
+| 配置 | Viper 1.21.0 + YAML + FLIGHT_ 环境覆盖 | 已在 v2 配置中使用 |
+| 日志 | Zap 1.28.0 | 结构化日志、request_id、trace_id |
+| 认证 | golang-jwt/jwt/v5 5.3.1 | 基础能力存在，正式入口接线待收口 |
+| 授权 | Human/Machine Principal + RBAC + AccessScope | BVS2-04 已使用核心授权校验 |
+| 测试 | Go unit、HTTP、Memory/显式 SQL integration test | 已建立测试基线 |
+| 本地部署 | Docker Compose | Core、Edge、Worker 和双 MySQL |
+| 前端 | `frontend/` 工作区目录骨架已创建 | React + TypeScript + Vite + pnpm workspace 为提议方案；源码、依赖和构建配置尚未实现 |
 
----
+## 2. v2 程序入口
 
-## 1. 后端:Go + Gin
+~~~text
+cmd/core-api      Core API，Core 唯一业务事实源
+cmd/edge-api      Edge API，Projection/Command/Inbox 接入
+cmd/worker        Core Outbox 投递和 Edge Command 拉取
+cmd/migrate       Core/Edge 独立 SQL Migration
+~~~
 
-**选择**:Go 1.22+ + Gin + GORM
+Core 继续是模块化单体，不拆 flight、task、personnel、event、rule 微服务。
 
-**对齐要求**:
-- 成本低:单二进制部署,资源占用极低
-- 好维护:Go 语法简单,显式清晰
-- 加功能成本低:模块化结构,新增模块快
-- 稳定:Go 运行时成熟,内存安全
-- 安全:JWT + Casbin RBAC + 参数校验
-- 响应快:协程并发,内存级性能
+## 2.5 前后端目录边界
 
-**关键技术点**:
-- 架构形态:模块化单体,模块边界清晰(flight/task/event/personnel/rule/analytics/push/device/prediction/auth/common)
-- ORM:GORM(MySQL,数据访问) + 版本化 SQL 迁移(独立命令执行,服务启动不隐式迁移)
-- 状态机:自研轻量状态机(人员/任务/事件状态流转)
-- 规则引擎:自研轻量规则执行器(预置+阈值)
-- 定时任务:robfig/cron(超时检查、状态未知检查、统计聚合)
-- API 风格:RESTful,版本化(`/api/v1/...`)
-- AI 预测桩:`/api/prediction/analyze` 返回 `not_enabled`
+前端与 Go 后端在同一仓库中分目录维护。前端独立构建和部署，但不需要把现有 Go 代码移动到新的 `backend/` 目录；`cmd/`、`internal/`、`migrations/` 仍是后端的标准 Go 目录结构。
 
----
-
-## 2. Go 原型目录结构
-
-```
-flight-collaboration-platform/
-├── cmd/
-│   └── server/              # 主程序入口 main.go
-├── internal/
-│   ├── config/              # 配置加载(viper)
-│   ├── server/              # HTTP 服务器 + 路由装配
-│   ├── middleware/          # JWT 鉴权、日志、Recovery、CORS
-│   ├── model/               # GORM 数据模型
-│   │   ├── flight.go
-│   │   ├── task.go
-│   │   ├── event.go
-│   │   ├── personnel.go
-│   │   └── ...
-│   ├── module/              # 业务模块(模块化单体核心)
-│   │   ├── flight/          # 航班模块
-│   │   ├── task/            # 任务模块
-│   │   ├── event/           # 事件模块
-│   │   ├── personnel/       # 人员状态模块
-│   │   ├── rule/            # 规则引擎
-│   │   ├── analytics/       # 运行数据分析中心
-│   │   ├── push/            # 精准推送(通道抽象)
-│   │   ├── device/          # 设备状态上报(RFID 预留)
-│   │   ├── prediction/      # AI 预测桩
-│   │   └── auth/            # 认证/权限
-│   ├── common/              # 审计、异常、工具
-│   └── store/               # Redis/DB 连接管理
-├── pkg/                     # 可复用包(可选公共库)
-├── api/                     # API 定义(OpenAPI/请求响应结构)
-├── configs/                 # 配置文件
-│   └── config.yaml
-├── deployments/
-│   └── docker-compose.yml   # MySQL + Redis + App
-├── web-admin/               # Vue 3 管理端(后续)
-├── miniapp/                 # 微信小程序(后续)
-├── scripts/                 # 迁移/种子脚本
-├── go.mod
-├── go.sum
-├── Makefile
-└── README.md
+```text
+frontend/
+├── apps/
+│   ├── admin-web/src/       # 管理端，只调用 Core API
+│   └── employee-web/src/    # 员工端，只调用 Edge API
+├── packages/
+│   ├── contracts/src/
+│   ├── api-client/src/
+│   ├── auth/src/
+│   ├── ui/src/
+│   ├── task-domain/src/
+│   └── mock/src/
+├── e2e/
+└── docs/
 ```
 
----
+上述目录目前是前端工程骨架，不代表页面、API Client、认证或测试已经实现。浏览器不能直连 Core/Edge MySQL、Redis、Outbox、Inbox 或 Worker。
 
-## 3. 选型与 6 项要求对照
+## 3. 数据库和数据所有权
 
-| 要求 | 如何满足 |
-|------|----------|
-| 成本低 | Go 单二进制;资源占用极低;Docker Compose 免 K8s;小程序免 App 渠道 |
-| 好维护 | Go 语法简单显式;单仓多模块;模块边界清晰 |
-| 加功能成本低 | 模块化结构;Gin 路由分组;GORM 自动迁移 |
-| 稳定 | Go 运行时成熟;协程并发安全;Docker 隔离 |
-| 安全 | JWT + Casbin RBAC;HTTPS;数据范围中间件;审计日志 |
-| 响应快 | Go 协程;Redis 缓存;WebSocket 实时;单二进制启动快 |
+- Core MySQL 保存航班、人员、岗位、能力、任务模板/实例/候选/分配、状态历史、Audit、Outbox 和业务幂等。
+- Edge MySQL 保存移动端最小 Projection、Command、Session、Inbox 和 delivery。
+- Core 与 Edge 不共库、不跨库 JOIN；Edge 不直连 Core DB，Core 不直写 Edge DB。
+- 服务启动不执行 GORM AutoMigrate。
+- 所有数据库结构变更必须通过 migrations/core/mysql 或 migrations/edge/mysql 的版本化 SQL 执行。
+- Redis 只处理缓存、限流、短锁、在线状态和临时去重，不能替代 MySQL、Outbox 或 Inbox。
 
----
+## 4. 代码分层边界
 
-## 4. 未来扩展路径(企业阶段)
+~~~text
+internal/core          Core 领域、Application、MySQL Adapter、同步
+internal/edge          Edge Application、Projection、Command、Inbox
+internal/integration   Core ↔ Edge Transport 和 Worker
+internal/platform      配置、MySQL、Redis、日志、健康、安全
+internal/shared        Event/Command Envelope、公共 ID 和基础类型
+~~~
 
-若未来企业扩展阶段遇到生态瓶颈(规则引擎/状态机/安全),可参考 `tech-selection-report.md` 中的 Java 方案评估迁移,模块化结构保证迁移成本可控。
+约束：
 
-AI 预测未来抽离 Python FastAPI 微服务,主系统通过 HTTP 调用,Go 主系统不改。
+- Handler 不直接调用 GORM。
+- Service 不依赖 Gin。
+- Domain 不依赖 Gin、GORM 或 Redis。
+- 所有写操作必须经过后端权限、状态和事务校验。
 
-硬件接入:设备接入网关(可 Go/Java)+ device API,主系统不改。
+## 5. 当前未纳入实现基线的能力
 
----
+以下能力目前只有 Port、桩或设计边界，不代表已经实现：
 
-*本文档为 Go 原型技术栈,下一步初始化项目骨架。*
+- Web 管理端和移动端业务工程（目录骨架已创建，源码尚未实现）；
+- 完整前端 API Client、认证和页面实现；
+- 生产级 JWT Middleware、服务间认证和 mTLS；
+- 真实推送、企业 IM、AI 模型、RFID/UWB；
+- 完整指标平台、集中式日志和生产 HA/DR；
+- 微服务拆分、Kubernetes、Kafka、RabbitMQ、分布式事务。
+
+当前 Phase 2 已完成 BVS2-01 至 BVS2-04，下一项是 BVS2-05 Edge Projection → Employee Command。
+
+## 6. 相关文档
+
+- 技术选型说明：tech-selection-report.md
+- 详细技术栈：memory-bank/tech-stack.md
+- 架构记录：memory-bank/architecture.md
+- 架构规范：docs/architecture/architecture-v2.md
+- 前后端交接：docs/frontend-backend-handoff.md

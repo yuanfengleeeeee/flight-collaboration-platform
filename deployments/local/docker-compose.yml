@@ -1,0 +1,115 @@
+services:
+  core-mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: core-root-local
+      MYSQL_DATABASE: flight_core
+      MYSQL_USER: core_app
+      MYSQL_PASSWORD: change-me
+    ports:
+      - "${CORE_MYSQL_HOST_PORT:-3310}:3306"
+    volumes:
+      - core_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  edge-mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: edge-root-local
+      MYSQL_DATABASE: flight_edge
+      MYSQL_USER: edge_app
+      MYSQL_PASSWORD: change-me
+    ports:
+      - "${EDGE_MYSQL_HOST_PORT:-3311}:3306"
+    volumes:
+      - edge_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  core-api:
+    build:
+      context: ../..
+      dockerfile: deployments/local/Dockerfile
+      args: {TARGET: core-api}
+    environment:
+      FLIGHT_CORE_DB_HOST: core-mysql
+      FLIGHT_CORE_DB_PORT: 3306
+      FLIGHT_CORE_DB_USERNAME: core_app
+      FLIGHT_CORE_DB_PASSWORD: change-me
+      FLIGHT_CORE_DB_DATABASE: flight_core
+      FLIGHT_EDGE_DB_HOST: edge-mysql
+      FLIGHT_EDGE_DB_PORT: 3306
+      FLIGHT_EDGE_DB_USERNAME: edge_app
+      FLIGHT_EDGE_DB_PASSWORD: change-me
+      FLIGHT_EDGE_DB_DATABASE: flight_edge
+      FLIGHT_CORE_PORT: 8081
+      FLIGHT_EDGE_PORT: 8082
+      FLIGHT_CORE_ALLOW_DEV_ACTOR_HEADERS: "true"
+    depends_on:
+      core-mysql: {condition: service_healthy}
+    ports: ["8081:8081"]
+
+  edge-api:
+    build:
+      context: ../..
+      dockerfile: deployments/local/Dockerfile
+      args: {TARGET: edge-api}
+    environment:
+      FLIGHT_CORE_DB_HOST: core-mysql
+      FLIGHT_CORE_DB_PORT: 3306
+      FLIGHT_CORE_DB_USERNAME: core_app
+      FLIGHT_CORE_DB_PASSWORD: change-me
+      FLIGHT_CORE_DB_DATABASE: flight_core
+      FLIGHT_EDGE_DB_HOST: edge-mysql
+      FLIGHT_EDGE_DB_PORT: 3306
+      FLIGHT_EDGE_DB_USERNAME: edge_app
+      FLIGHT_EDGE_DB_PASSWORD: change-me
+      FLIGHT_EDGE_DB_DATABASE: flight_edge
+      FLIGHT_CORE_PORT: 8081
+      FLIGHT_EDGE_PORT: 8082
+      FLIGHT_EDGE_ALLOW_DEV_ACTOR_HEADERS: "true"
+    depends_on:
+      edge-mysql: {condition: service_healthy}
+    ports: ["8082:8082"]
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deployments/local/Dockerfile
+      args: {TARGET: worker}
+    environment:
+      FLIGHT_CORE_DB_HOST: core-mysql
+      FLIGHT_CORE_DB_PORT: 3306
+      FLIGHT_CORE_DB_USERNAME: core_app
+      FLIGHT_CORE_DB_PASSWORD: change-me
+      FLIGHT_CORE_DB_DATABASE: flight_core
+      FLIGHT_EDGE_DB_HOST: edge-mysql
+      FLIGHT_EDGE_DB_PORT: 3306
+      FLIGHT_EDGE_DB_USERNAME: edge_app
+      FLIGHT_EDGE_DB_PASSWORD: change-me
+      FLIGHT_EDGE_DB_DATABASE: flight_edge
+      FLIGHT_SYNC_EDGE_BASE_URL: http://edge-api:8082
+    depends_on:
+      core-mysql: {condition: service_healthy}
+      edge-api: {condition: service_started}
+
+  core-redis:
+    image: redis:7-alpine
+    profiles: [redis]
+    ports: ["6379:6379"]
+
+  edge-redis:
+    image: redis:7-alpine
+    profiles: [redis]
+    ports: ["6380:6379"]
+
+volumes:
+  core_mysql_data:
+  edge_mysql_data:

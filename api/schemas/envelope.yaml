@@ -1,0 +1,28 @@
+components:
+  schemas:
+    EventEnvelope:
+      type: object
+      required: [event_id, event_type, schema_version, aggregate_type, aggregate_id, occurred_at, producer, correlation_id, trace_id, payload]
+      properties:
+        event_id: {type: string, format: uuid}
+        event_type: {type: string, example: task.assigned.v1}
+        schema_version: {type: integer, minimum: 1}
+        aggregate_type: {type: string}
+        aggregate_id: {type: string}
+        occurred_at: {type: string, format: date-time}
+        producer: {type: string}
+        correlation_id: {type: string, format: uuid}
+        trace_id: {type: string}
+        payload: {type: object, additionalProperties: true}
+    CommandEnvelope:
+      type: object
+      required: [command_id, command_type, schema_version, actor_public_id, aggregate_id, occurred_at, trace_id, payload]
+      properties:
+        command_id: {type: string, format: uuid}
+        command_type: {type: string, example: task.completed.v1}
+        schema_version: {type: integer, minimum: 1}
+        actor_public_id: {type: string, format: uuid}
+        aggregate_id: {type: string}
+        occurred_at: {type: string, format: date-time}
+        trace_id: {type: string}
+        payload: {type: object, additionalProperties: true}

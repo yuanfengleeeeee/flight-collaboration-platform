@@ -5,70 +5,94 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
-	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/common"
-	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/config"
-	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/store"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/config"
+	platformlogger "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/logger"
+	platformmysql "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/mysql"
 	"go.uber.org/zap"
 )
 
 func main() {
-	configPath := flag.String("config", "configs/config.yaml", "配置文件路径")
-	migrationsDir := flag.String("dir", "migrations/mysql", "迁移文件目录")
-	command := flag.String("command", "status", "迁移命令: up/down/status")
+	// 迁移是独立命令，不在 API/Worker 启动时隐式执行；target 决定使用
+	// Core 还是 Edge 的数据库和 migration 目录。
+	configPath := flag.String("config", "configs/config.v2.yaml", "Architecture v2 config path")
+	target := flag.String("target", "", "database target: core or edge")
+	command := flag.String("command", "status", "migration command: up, down or status")
+	dir := flag.String("dir", "", "optional migration directory override")
+	allowDestructive := flag.Bool("allow-destructive", false, "explicitly allow destructive down migration")
 	flag.Parse()
+
+	if *target != "core" && *target != "edge" {
+		fail(nil, "target must be core or edge")
+	}
+	if *command == "down" && !*allowDestructive {
+		fail(nil, "down requires -allow-destructive and must only run against an isolated database")
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		fail("加载配置失败", err)
+		fail(err, "load config")
 	}
-	common.InitLogger(cfg.Log.Level, cfg.Log.Encoding, cfg.Log.Output)
+	log, err := platformlogger.New(cfg.Log)
+	if err != nil {
+		fail(err, "initialize logger")
+	}
+	defer log.Sync()
 
-	db, err := store.NewMySQL(cfg.MySQL)
-	if err != nil {
-		fail("连接 MySQL 失败", err)
+	dbConfig := cfg.Core.DB
+	defaultDir := filepath.Join("migrations", "core", "mysql")
+	if *target == "edge" {
+		dbConfig = cfg.Edge.DB
+		defaultDir = filepath.Join("migrations", "edge", "mysql")
 	}
-	sqlDB, err := db.DB()
+	if *dir != "" {
+		defaultDir = *dir
+	}
+
+	db, err := platformmysql.Open(dbConfig)
 	if err != nil {
-		fail("获取 MySQL 连接失败", err)
+		fail(err, "open database")
+	}
+	sqlDB, err := platformmysql.SQLDB(db)
+	if err != nil {
+		fail(err, "get sql database")
 	}
 	defer sqlDB.Close()
 
-	migrator := store.NewSQLMigrator(sqlDB, *migrationsDir)
+	migrator := platformmysql.NewMigrator(sqlDB, defaultDir)
 	ctx := context.Background()
 	switch *command {
 	case "up":
-		if err := migrator.Up(ctx); err != nil {
-			fail("执行迁移失败", err)
-		}
-		fmt.Println("database migrations applied")
+		err = migrator.Up(ctx)
 	case "down":
-		if err := migrator.Down(ctx); err != nil {
-			fail("回滚迁移失败", err)
-		}
-		fmt.Println("latest database migration rolled back")
+		err = migrator.Down(ctx)
 	case "status":
-		status, err := migrator.Status(ctx)
-		if err != nil {
-			fail("读取迁移状态失败", err)
-		}
-		for _, item := range status {
-			state := "pending"
-			if item.Applied {
-				state = "applied"
+		var status []platformmysql.Status
+		status, err = migrator.Status(ctx)
+		if err == nil {
+			for _, item := range status {
+				state := "pending"
+				if item.Applied {
+					state = "applied"
+				}
+				fmt.Printf("%06d %-36s %s\n", item.Version, item.Name, state)
 			}
-			fmt.Printf("%06d %-32s %s\n", item.Version, item.Name, state)
-		}
-		if len(status) == 0 {
-			fmt.Println("no migrations found")
 		}
 	default:
-		fail("不支持的迁移命令", fmt.Errorf("command=%s", *command))
+		fail(nil, "command must be up, down or status")
 	}
+	if err != nil {
+		fail(err, "migration command failed")
+	}
+	log.Info("migration command completed", zap.String("target", *target), zap.String("command", *command), zap.String("directory", defaultDir))
 }
 
-func fail(message string, err error) {
-	common.L().Error(message, zap.Error(err))
-	fmt.Fprintf(os.Stderr, "%s: %v\n", message, err)
+func fail(err error, message string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", message, err)
+	} else {
+		fmt.Fprintln(os.Stderr, message)
+	}
 	os.Exit(1)
 }
