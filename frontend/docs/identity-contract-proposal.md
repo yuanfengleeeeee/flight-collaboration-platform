@@ -40,6 +40,18 @@
 6. `admin-web` 只使用 Core audience 的会话；`employee-miniapp` 和 `employee-web` 只使用 Edge audience 的会话。一个客户端拿到的 Token 不应被另一个 API 接受。
 7. JWT 只携带最小会话声明。角色和 Scope 由可信服务端解析或通过受控声明注入，前端展示的角色永远不等于最终授权。
 
+### 2.2 用户需求匹配
+
+| 用户需求 | 合同匹配 | 落地方式 |
+| --- | --- | --- |
+| 首次在小程序登录 | 支持 | 使用工号 + 密码完成平台账号认证；密码只在 HTTPS 认证请求中传输，服务端只保存密码哈希 |
+| 个人微信和企业微信绑定同一账号 | 支持 | 工号密码认证后取得一次性绑定会话，分别完成个人微信和企业微信授权；两条绑定最终指向同一个 `StaffPublicID` |
+| 任一入口都能看到最新数据 | 支持，但同步有短暂延迟 | 两个入口使用同一个 Staff 会话访问 Edge；Core 事件更新 Edge Projection，不能依赖浏览器本地数据作为事实 |
+| 后续登录简单 | 支持 | 已绑定入口通过微信授权直接换取平台会话；工号密码作为首次绑定、换设备和恢复入口 |
+| 长时间保持登录 | 支持，但不可永久有效 | 使用短期 Access Token + 可撤销 Refresh/Session；会话失效、Staff 停用或管理员撤销后必须重新认证 |
+
+这里的“同一个账号”指同一个 Core `Staff`，不是把个人微信号或企业微信号直接当成账号。员工 Web 也复用工号密码登录和已绑定身份，不再依赖开发 Header。
+
 ## 3. 推荐的会话分层
 
 | 层 | 责任 | 前端可见内容 | 前端不可获得/不可依赖 |
@@ -53,7 +65,28 @@
 
 ## 4. 推荐登录与绑定流程
 
-### 4.1 员工微信小程序
+### 4.1 首次工号密码登录与绑定
+
+员工首次进入小程序时，流程固定为：
+
+```text
+输入工号 + 密码
+  → Edge 认证入口转交可信身份适配器
+  → 服务端按工号找到 Core Staff 并校验密码/Staff 状态
+      ├─ 认证成功且已有绑定 → 签发 Edge Session
+      ├─ 认证成功但没有当前 provider 绑定 → 返回一次性 binding_ticket
+      ├─ 密码错误/账号锁定 → 返回稳定错误，不泄露账号是否存在
+      └─ Staff 非 active → 拒绝登录
+  → 当前微信入口授权
+  → 服务端验证 provider_code 并绑定到同一个 Staff
+  → 签发 Edge Session
+```
+
+工号密码校验和外部身份绑定必须由服务端完成。Edge 可以作为员工认证的公开 API 外观，但不得读取 Core 数据库；实际实现应通过可信的身份适配器/内部 Auth Port 获取 Core 的认证结果。Edge 不保存原始密码，也不把密码或外部平台标识写入 Command、Projection 或日志。
+
+绑定个人微信后，员工还可以在“绑定企业微信”入口重复同一流程；绑定企业微信后也可以反向绑定个人微信。若外部身份已指向其他 Staff，必须返回冲突并停止自动迁移。
+
+### 4.2 员工微信小程序
 
 个人微信和企业微信都进入同一套小程序业务壳层，但由不同 `AuthAdapter` 获取入口授权结果：
 
@@ -73,19 +106,64 @@
 
 小程序页面不关心不同平台的原始身份字段，只处理统一的 `SessionState`。平台入口差异只能存在于 `AuthAdapter`，不能渗透到 `task-domain` 或共享 DTO。
 
-### 4.2 员工 Web
+### 4.3 员工 Web
 
-`employee-web` 是正式支持的员工入口，不默认依赖开发 Header。建议先支持企业内部可控的网页登录/扫码登录，并复用同一外部身份绑定与 Edge Session；如果产品必须支持个人微信浏览器登录，再增加 `personal_wechat_web` Adapter，不改变 Staff 映射和 Edge API 边界。
+`employee-web` 是正式支持的员工入口，不默认依赖开发 Header。必须支持工号 + 密码登录；已绑定的微信/企业微信身份可以作为快捷登录入口，是否增加浏览器端个人微信授权 Adapter 只影响入口，不改变 Staff 映射和 Edge API 边界。
 
-### 4.3 管理端 Web
+### 4.4 管理端 Web
 
 `admin-web` 使用 Core audience 的管理会话。管理用户可以是 `admin`、`manager` 或 `leader`；管理端不通过员工小程序身份冒充管理用户，也不把前端选中的 Role/Scope 作为授权依据。
+
+### 4.5 两个微信入口的数据一致性
+
+个人微信和企业微信绑定完成后，两个入口使用同一个 `StaffPublicID`：
+
+```text
+个人微信 Session ─┐
+                   ├─→ Edge task_projection(employee_public_id = StaffPublicID)
+企业微信 Session ─┘
+```
+
+管理端对 Core Task 的确认/取消、员工在任一入口发出的 Accept/Complete，最终都通过既有 Core Event → Edge Projection 链路收敛。用户可能短时间看到旧状态，这是可靠同步的可见延迟，不是两套数据；前端必须展示刷新/同步状态，不能用本地结果覆盖服务端状态。
 
 ## 5. 建议的公共认证合同
 
 以下是待后端确认的最小形状，不代表当前接口已经实现：
 
-### 5.1 员工会话换取
+### 5.1 工号密码首次登录
+
+以下接口是待后端确认的建议合同，员工客户端通过 Edge API 公开入口调用：
+
+```http
+POST /api/v1/auth/password/login
+Content-Type: application/json
+```
+
+```json
+{
+  "employee_no": "E000123",
+  "password": "<password>",
+  "client": "employee-miniapp"
+}
+```
+
+认证成功且尚未完成当前入口绑定时，建议返回受限的一次性 `binding_ticket`，它不能读取任务或提交 Command：
+
+```json
+{
+  "data": {
+    "state": "binding_required",
+    "binding_ticket": "<one-time-ticket>",
+    "provider": "personal_wechat"
+  },
+  "request_id": "<request-id>",
+  "trace_id": "<trace-id>"
+}
+```
+
+绑定完成后才签发正常 Edge Session。员工 Web 使用同一接口时，`client` 改为 `employee-web`。
+
+### 5.2 员工会话换取
 
 ```http
 POST /api/v1/auth/exchange
