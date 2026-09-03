@@ -117,3 +117,7 @@
 - The first full test attempt was blocked by restricted access to the default Go build cache. Re-running with ignored project-local `.tmp\gocache-handoff` succeeded: `go test ./...` passed and `go build ./...` exited 0.
 - `scripts/verify.ps1 -Mode all` passed after that rerun, covering Docker preflight, full Go tests, full Go build, Compose config, and `git diff --check`.
 - This does not constitute live migration, production OIDC, or dual-replica failure acceptance: Core `000005_admin_sso` remains unapplied and no Compose startup or destructive database operation was performed.
+## Provider decision clarification (2026-09-03)
+
+- The current product decision is direct enterprise WeChat browser OAuth. The code and config support `wecom` as the current default, including server-side access-token caching and member `UserId` mapping; OIDC is optional future-IAM support.
+- This clarification is consistent with the already pushed implementation and the two post-push architecture/progress document updates; no implementation rollback or force push is needed.

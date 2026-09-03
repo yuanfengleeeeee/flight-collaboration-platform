@@ -1,5 +1,12 @@
 # 项目进度
 
+## 2026-09-03 无 OIDC 方案与员工数据库边界确认
+
+- 用户确认当前没有 OIDC；管理端 SSO 采用企业微信浏览器 OAuth 直连，不需要开发管理端小程序。Core 管理 SSO Provider 白名单已放行 `wecom`，默认配置也以 `wecom` 为主；OIDC 适配器仅作为未来可选扩展，不是当前部署依赖。
+- “新的员工数据库”按已冻结的 Core/Edge 架构实现为 Core MySQL 内的员工主数据/凭证模块，不新增第三套物理数据库。组织/人员事实使用 `operation_area`、`team`、`personnel`、`team_member`，账号使用 `employee_credential`，个人微信和企业微信绑定使用 `external_identity_binding`，管理端身份使用 `admin_identity`。
+- 企业微信管理 Provider 已覆盖授权地址生成、服务端 access token 缓存、成员 `UserId` 解析和不接收企业外部联系人的约束；真实 CorpID/AgentID/Secret、HTTPS 回调/可信域名、Core `000005_admin_sso` migration、员工导入和 `admin_identity` 预置仍待部署联调。
+- 本轮实际验证：Docker 前置通过；`go test ./...`、`go build ./...`、`scripts/verify.ps1 -Mode all`、前端 `pnpm typecheck`、`pnpm lint`、`pnpm test`（5 文件/13 测试）和 `pnpm build`（admin-web、employee-web）均通过。未执行真实微信/企业微信平台调用，也未执行迁移、清库或破坏性 Volume 操作。
+
 ## 2026-09-02 真实身份接入骨架与最终边界
 
 - 已实现个人微信/企业微信真实 Provider 适配器：Core 服务端可在配置开启后调用个人微信 `code2Session`、企业微信 `gettoken/getuserinfo`，并把外部身份映射到同一个 `Staff`；开发环境默认仍使用显式 `mock:<subject>`，真实密钥不进入客户端、日志或仓库。

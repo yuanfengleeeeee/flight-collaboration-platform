@@ -210,7 +210,7 @@ BVS2-06 首个实现步骤已完成；后续仍不得让 Edge 写 Core 事实，
 
 - 前端交付边界固定为三个客户端：`admin-web` 只调用 Core API；`employee-miniapp` 和正式支持的 `employee-web` 只调用 Edge API。所有前端运行时代码、构建配置、Mock、测试和 E2E 位于 `/frontend`。
 - 员工小程序同时支持个人微信和企业微信入口；两类外部身份必须由服务端映射到同一个 Core `Staff`，客户端不得把 openid、unionid、企业微信标识或 `X-Employee-Public-ID` 当作生产业务身份。
-- F0 的工程验收门槛、当前差异和未决合同统一记录在 `frontend/docs/architecture-freeze-gate.md`。页面路由、线框、视觉 Token、状态矩阵和可访问性已由 `frontend/docs/page-design.md` 冻结；Command 客户端幂等/状态查询、OpenAPI 基础对齐、工具链、员工 Web 真实 API/浏览器联调已有源码与验证，异常恢复 E2E、管理端 SSO callback、真实 Provider 线上联调、环境域名和凭据仍待完成。
+- F0 的工程验收门槛、当前差异和未决合同统一记录在 `frontend/docs/architecture-freeze-gate.md`。页面路由、线框、视觉 Token、状态矩阵和可访问性已由 `frontend/docs/page-design.md` 冻结；Command 客户端幂等/状态查询、OpenAPI 基础对齐、工具链、员工 Web 真实 API/浏览器联调和管理端企业微信 SSO callback 已有源码与验证，异常恢复 E2E、真实 Provider 线上联调、环境域名和凭据仍待完成。
 - F0 身份合同提案位于 `frontend/docs/identity-contract-proposal.md`：外部微信/SSO 身份只用于登录和绑定，平台会话中的员工 `sub` 必须是服务端确认的 `StaffPublicID`；Core/Edge 不接受客户端伪造员工身份，也不把外部身份标识写入业务 Command。
 - BVS2-07 身份边界已落地：Core 持有 `employee_credential`、`external_identity_binding` 与一次性 `identity_binding_ticket`；Edge 仅持有最小 `mobile_session`，不直连 Core 身份表。Core 内部身份 Port 由共享密钥保护，开发环境仍只接受显式 `mock:<subject>`；真实 Provider 适配器已支持配置化个人微信 `code2Session` 和企业微信 `gettoken/getuserinfo`，但未配置生产凭据或执行线上联调。
 
@@ -219,7 +219,7 @@ BVS2-06 首个实现步骤已完成；后续仍不得让 Edge 写 Core 事实，
 - 个人微信员工入口需要原生小程序：小程序调用 `wx.login()` 获取一次性 code，Core 后端用服务端 AppID/AppSecret 换取平台身份；AppSecret、session_key 不进入小程序或 Edge。
 - 企业微信员工入口可以采用企业微信 OAuth/H5 code，也可以配置企业微信容器内的小程序入口；后端统一将企业成员身份映射到 Core `Staff`，同一 Staff 可同时绑定个人微信和企业微信。
 - 管理端 SSO 是独立的浏览器企业微信 OAuth 流程（当前不依赖 OIDC，也可在未来增加其他 Provider），不需要开发管理端小程序；浏览器只处理一次性 code，后端负责 state、redirect、企业归属、管理角色校验并签发 Core audience 会话。
-- 因为没有 OIDC，员工账号、组织、凭证和微信绑定由 Core MySQL 的员工主数据模块承载；当前不新增第三套物理数据库，Edge 只保存移动端 Session/Projection/Command。
+- 因为没有 OIDC，员工账号、组织、凭证和微信绑定由 Core MySQL 的员工主数据模块承载；该“员工数据库”由 Core 的组织/人员业务表和 `000003_employee_identity` migration 建立，当前不新增第三套物理数据库，Edge 只保存移动端 Session/Projection/Command。
 - 真实 Provider 默认关闭，配置开关为 `identity.real_providers_enabled`；没有凭据、回调域名和管理用户映射时，不得宣称真实登录或 SSO 已完成。
 - 员工 Edge Session 使用短期 Access JWT（`sid` + Edge audience）和可撤销 Refresh Token；Refresh Token 只保存 SHA-256 摘要，轮换重放会撤销替换 Session。JWT 解析后由 Edge Session Resolver 校验本地 Session，并向 Core 查询 Staff active 状态；Core/Edge audience 分离。
 ## 2026-09-01 Employee Command public contract

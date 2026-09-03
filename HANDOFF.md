@@ -334,3 +334,7 @@ Phase 2  BVS2-05 Edge Projection → Employee Command IN PROGRESS
 - Authorization remains Core-owned: provider authentication must resolve to a pre-provisioned active `admin_identity`; current role and scope are restored from the Core session. Production identity source, credentials, callback domains, and admin provisioning remain pending.
 - Docker Engine preflight succeeded in this session. The new migration has not been applied, and no destructive database or volume operation was run. Full verification status is recorded in `memory-bank/progress.md`.
 - Next session: run the full Go test/build checks, apply `000005_admin_sso` only to an isolated database, then exercise management SSO/personnel/assignment HTTP flows before production-provider, failure-recovery, and performance gates.
+## Provider decision clarification (2026-09-03)
+
+- The current product decision is direct enterprise WeChat browser OAuth. The pushed Core implementation supports `wecom` as the current default, including server-side access-token caching and member `UserId` mapping; OIDC is an optional future-IAM adapter.
+- The two post-push modifications in `memory-bank/architecture.md` and `memory-bank/progress.md` were preserved and are being synchronized in this supplementary commit; they were not overwritten as unknown parallel work.

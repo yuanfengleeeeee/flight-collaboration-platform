@@ -21,3 +21,7 @@ Date: 2026-09-02
 ## Verification boundary
 
 Unit tests cover one-time state consumption, session role/scope restoration, replay rejection, handler cookie behavior, management principal authorization, and the Enterprise WeChat adapter contract. Live Enterprise WeChat calls and production identity provisioning remain unverified until deployment credentials and domains are supplied.
+## Provider selection clarification
+
+- The current product decision selects direct enterprise WeChat browser OAuth as the default management identity source; `admin_sso_provider: wecom` is the example/default configuration and the Core `WeComProvider` performs member `UserId` resolution with server-side access-token caching.
+- OIDC remains an optional provider adapter for a future existing-IAM deployment. It is not required for the current deployment and does not change the Core-owned identity mapping, session, role, or scope rules.
