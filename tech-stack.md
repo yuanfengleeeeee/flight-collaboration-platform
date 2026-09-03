@@ -44,7 +44,8 @@ Core 继续是模块化单体，不拆 flight、task、personnel、event、rule 
 frontend/
 ├── apps/
 │   ├── admin-web/src/       # 管理端，只调用 Core API
-│   └── employee-web/src/    # 员工端，只调用 Edge API
+│   ├── employee-miniapp/src/# 员工小程序，只调用 Edge API
+│   └── employee-web/src/    # 员工 Web 备用入口，只调用 Edge API
 ├── packages/
 │   ├── contracts/src/
 │   ├── api-client/src/
@@ -95,7 +96,13 @@ internal/shared        Event/Command Envelope、公共 ID 和基础类型
 - 完整指标平台、集中式日志和生产 HA/DR；
 - 微服务拆分、Kubernetes、Kafka、RabbitMQ、分布式事务。
 
-当前 Phase 2 已完成 BVS2-01 至 BVS2-04，下一项是 BVS2-05 Edge Projection → Employee Command。
+当前 Phase 2 已完成 BVS2-01 至 BVS2-06 的后端冻结范围；前端转入 F0 架构冻结和性能门禁确认。
+
+## 2.6 性能与可靠性边界
+
+消息准确性、可靠同步和状态收敛优先于视觉装饰。前端关键操作不得等待动画，默认只使用短时 `transform`/`opacity` 过渡；高成本持续特效默认禁止。后端优化必须先测量 API、数据库、Worker 和 Projection lag，不得为了吞吐移除 Outbox、Inbox、Command、幂等或版本保护。
+
+详细前端性能预算、动画限制和后端优化待办见 `docs/performance-and-reliability-baseline.md`。
 
 ## 6. 相关文档
 
@@ -104,3 +111,4 @@ internal/shared        Event/Command Envelope、公共 ID 和基础类型
 - 架构记录：memory-bank/architecture.md
 - 架构规范：docs/architecture/architecture-v2.md
 - 前后端交接：docs/frontend-backend-handoff.md
+- 性能与可靠性基线：docs/performance-and-reliability-baseline.md

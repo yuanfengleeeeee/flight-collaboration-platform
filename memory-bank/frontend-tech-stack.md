@@ -1,9 +1,9 @@
 # 前端技术栈与工程结构
 
-> 状态：PROPOSED；`frontend/` 目录骨架已创建，依赖 `frontend-design-document.md` 冻结
-> 更新时间：2026-09-01
+> 状态：IMPLEMENTED BASELINE；正式 Web 工程和共享 API/会话层已落地，小程序平台适配层已落地
+> 更新时间：2026-09-02
 
-当前只落地了目录骨架和占位文件，没有落地前端源码、`package.json`、lockfile、构建配置或可运行页面。以下 React、TypeScript、Vite、pnpm workspace 选型仍需完成 F0/F1 后才能标记为已实现。
+React、TypeScript、Vite、pnpm workspace、共享 contracts/API client/auth/task-domain/ui 和两个 Web 应用壳层已经落地。Node.js v24.20.0、npm 11.19.0、pnpm 9.15.0 已配置，依赖已安装，前端 lint/typecheck/unit/build 已通过；浏览器联调和微信小程序仍需真实 AppID、通信域名和平台构建链。
 
 ## 1. 技术选型
 
@@ -83,7 +83,17 @@ VITE_ENABLE_DEV_ACTOR=false
 - 不在浏览器实现 Outbox/Inbox，不轮询内部同步接口，不直连 Core/Edge MySQL；
 - 共享包只共享无副作用的 DTO、UI 和状态映射，不能让 admin-web 通过共享包间接依赖 Edge 数据库边界。
 
-## 5. 构建与验证门
+## 5. 性能与动效约束
+
+- 关键操作不等待动画；Confirm、Cancel、Accept、Complete、Retry 必须立即发起请求并显示真实 pending/syncing 状态。
+- 默认只使用短时 `transform`/`opacity` 过渡，UI 动画原则上不超过 300ms；必须支持 `prefers-reduced-motion`。
+- 禁止默认加入全屏视频/WebGL/Canvas 粒子、视差/鼠标跟随、复杂 3D、大面积 blur/backdrop-filter、动态渐变、无限循环装饰、全量列表 stagger 和大型 Lottie/SVG 动效。
+- 不动画化 `width`、`height`、`margin`、`padding`、`top`、`left` 等布局属性；不使用 `transition: all`，不无上限使用 `will-change`、`requestAnimationFrame` 或页面级定时器。
+- 管理端和员工端按路由分包，长列表分页/窗口化，请求支持去重、取消和有限退避；不把浏览器缓存或小程序本地缓存当作可靠 Command 队列。
+- 目标指标（待 F1/F8 在代表性设备和真实数据量上验证）：Web INP ≤ 200ms、LCP ≤ 2.5s、CLS ≤ 0.1；关键同步操作不能因动画或渲染阻塞。
+- 详细限制、后端性能待办和验收方法见 `docs/performance-and-reliability-baseline.md`。
+
+## 6. 构建与验证门
 
 前端工程创建后应提供以下脚本，并在 `frontend/` 工作区执行：
 

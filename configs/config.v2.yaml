@@ -58,6 +58,7 @@ sync:
   batch_size: 20
   max_attempts: 5
   request_timeout_ms: 3000
+  claim_lease_seconds: 30
   tls:
     enabled: false
     cert_file: ""
@@ -71,6 +72,31 @@ jwt:
   secret: change-me-local-development-secret
   issuer: flight-core
   audience: flight-platform
+identity:
+  core_base_url: http://127.0.0.1:8081
+  internal_api_key: change-me-local-identity-key
+  real_providers_enabled: false
+  personal_wechat_app_id: ""
+  personal_wechat_secret: ""
+  wecom_corp_id: ""
+  wecom_agent_id: ""
+  wecom_secret: ""
+  access_token_ttl_seconds: 900
+  session_ttl_hours: 720
+  session_absolute_ttl_hours: 2160
+  max_login_attempts: 5
+  lockout_seconds: 900
+  binding_ticket_seconds: 600
+  admin_sso_enabled: false
+  admin_sso_provider: "wecom"
+  admin_sso_authorize_url: ""
+  admin_sso_token_url: ""
+  admin_sso_userinfo_url: ""
+  admin_sso_client_id: ""
+  admin_sso_client_secret: ""
+  admin_sso_allowed_redirect_uris: ""
+  admin_sso_state_ttl_seconds: 600
+  admin_sso_dev_subject: ""
 log:
   level: info
   encoding: console

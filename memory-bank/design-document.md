@@ -26,7 +26,7 @@ Core 与 Edge 通过版本化 Event/Command Envelope、Transactional Outbox、In
 
 ## 本轮非目标
 
-暂停 B3/B4/B5，不能实现真实航班、任务、人员、事件业务切片。也不实现 Kafka/RabbitMQ、Kubernetes、Service Mesh、分布式事务、复杂 CQRS/Event Sourcing、真实 AI、RFID/UWB、真实推送、SSO、完整 WebSocket、完整 PITR 或多实例生产部署。
+暂停 B3/B4/B5，不能实现真实航班、任务、人员、事件业务切片。也不实现 Kafka/RabbitMQ、Kubernetes、Service Mesh、分布式事务、复杂 CQRS/Event Sourcing、真实 AI、RFID/UWB、真实平台推送、SSO、完整多实例生产部署。T0-5 只实现本地 Gateway、双 Edge 和 best-effort fan-out 骨架，不等同于生产 HA 验收。
 
 ## 设计验收条件
 
@@ -48,3 +48,14 @@ integration -> stable business Port
 ```
 
 Handler 不调用 GORM；Service 不依赖 Gin；Domain 不依赖基础设施；模块不直接访问其他模块的表。
+
+## T0 员工任务实时交付设计（2026-09-02）
+
+本节是 Architecture Foundation 冻结后的产品化实施方向；T0-4 已完成员工 WebSocket 提示和客户端接入，T0-5 已完成 Gateway、双 Edge、共享 ticket、租约和 Redis fan-out 代码，但不表示微信订阅消息或生产多实例故障验收已经完成，也不重新打开 Core/Edge 数据所有权边界。完整决策见 [`docs/adr/ADR-009-employee-task-realtime-delivery.md`](../docs/adr/ADR-009-employee-task-realtime-delivery.md) 和 [`docs/adr/ADR-010-gateway-edge-horizontal-scaling.md`](../docs/adr/ADR-010-gateway-edge-horizontal-scaling.md)。
+
+- Edge 不按任务类型拆分；它是统一的员工接入和最小 Projection 服务，扩容时部署相同副本。
+- 员工任务的最终读取仍采用 Edge `GET /api/v1/tasks`。前台实时体验采用 WebSocket `task_changed` 提示，后台可接入经用户授权的平台通知；两者都不能替代拉取和恢复。
+- Core 事务仍写业务事实、Audit 和 Outbox；Worker 投递到 Edge Inbox，Edge Projection 事务提交后才触发尽力而为的通知。
+- 推送允许丢失、重复和乱序；客户端收到提示后重新拉取并按版本校准。断线、推送丢失或 Redis 不可用时，HTTP 拉取必须继续可用。
+- T0 顺序为：契约冻结 → 性能/同步基线 → 拉取恢复契约 → Notification Port → 前台 WebSocket → Gateway 与多 Edge/Worker → 后台平台通知 → 故障和容量门禁。
+- T0 不默认引入 Kafka、RabbitMQ、NATS、Service Mesh 或按任务拆分微服务；持久 Broker 必须以测量结果和独立 ADR 为前提。

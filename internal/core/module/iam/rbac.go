@@ -12,14 +12,14 @@ import (
 var defaultRolePermissions = map[string]map[security.Permission]bool{
 	security.RoleAdmin: {
 		"flight:read": true, "task:read": true, "task:assign": true, "task:cancel": true, "task:complete": true,
-		"event:handle": true, "personnel:read": true, "rule:manage": true, "analytics:read": true,
+		"event:handle": true, "personnel:read": true, "assignment:read": true, "rule:manage": true, "analytics:read": true,
 	},
 	security.RoleManager: {
 		"flight:read": true, "task:read": true, "task:assign": true, "task:cancel": true, "task:complete": true,
-		"event:handle": true, "personnel:read": true, "analytics:read": true,
+		"event:handle": true, "personnel:read": true, "assignment:read": true, "analytics:read": true,
 	},
 	security.RoleLeader: {
-		"flight:read": true, "task:read": true, "task:assign": true, "task:cancel": true, "event:handle": true, "personnel:read": true,
+		"flight:read": true, "task:read": true, "task:assign": true, "task:cancel": true, "event:handle": true, "personnel:read": true, "assignment:read": true,
 	},
 	security.RoleStaff: {
 		"task:read": true, "task:accept": true, "task:complete": true, "event:handle": true,

@@ -16,8 +16,9 @@
 4. Task 的创建、分配、接受、完成、取消和重新分配生命周期。
 5. OpenAPI、错误模型、权限模型和前端共享契约。
 6. 本地开发、Mock、测试账号、域名和验收环境。
+7. 性能预算、动效限制、降级策略和同步状态展示不能互相冲突。
 
-技术基础 `Architecture v2.0 Foundation` 已经是 `ACCEPTED / FROZEN`；本文件冻结的是面向前端交付的业务接入合同，当前尚未完成。
+技术基础 `Architecture v2.0 Foundation` 已经是 `ACCEPTED / FROZEN`；本文件冻结的是面向前端交付的业务接入合同。角色、页面边界、管理端完整工作区和员工端扩展入口已按用户确认形成 F0 信息架构基线；视觉评审、工程接入、平台配置和在线验证门仍在进行。
 
 ## 2. 客户端边界（当前基线）
 
@@ -41,19 +42,24 @@
 | Core/Edge 职责边界 | `DONE` | 管理端走 Core；员工小程序和员工 Web 走 Edge | 在 API Client 和 CI 规则中固化 |
 | Core Task 读侧 | `PARTIAL` | 当前已有 `GET /api/v1/tasks`、`GET /api/v1/tasks/{taskPublicID}`、JWT/RBAC/Scope 查询 | 用最终 OpenAPI 和前端 DTO 固化分页、筛选、详情字段 |
 | Task 写入语义 | `PARTIAL` | 当前 Task 由 Arrival 事务创建；Confirm/Cancel 已有实现 | 明确是否保留 Arrival-only 创建；明确取消后的再分配规则 |
-| 双微信身份映射 | `BLOCKED` | 已形成 [身份合同提案](identity-contract-proposal.md)，实际登录适配器和绑定流程尚未冻结 | 确认 AppID/企业微信配置、首次绑定、换绑、离职和多身份场景 |
-| 员工 Web 登录 | `BLOCKED` | `employee-web` 必须是正式支持入口；身份合同提案已给出推荐方案，但浏览器登录通道尚未确定 | 确认企业微信网页登录、个人微信网页登录或受控链接到小程序的策略，并形成 API 合同 |
-| 员工命令幂等 | `BLOCKED` | 当前快捷 Accept/Complete 会由服务端生成 command ID | 客户端提交稳定幂等键或 command ID；重复提交可安全返回同一结果 |
-| 员工命令状态查询 | `BLOCKED` | 当前有 `202 pending`，没有面向员工的稳定状态查询合同 | 冻结 pending/syncing/confirmed/failed 的字段、查询接口、重试和冲突展示 |
+| 工号密码首次认证 | `PARTIAL` | BVS2-07 已提供 Core 凭证、bcrypt 校验、失败次数限制和 Edge 工号密码登录；Docker/在线联调未完成 | 完成迁移/接口在线验证，补齐改密/重置和生产密码管理入口 |
+| 双微信身份映射 | `PARTIAL` | BVS2-07 已支持个人微信/企业微信 Provider exchange、一次性绑定票据和同一 Staff 映射；当前仅有显式 Mock Provider | 接入并验证真实 AppID/企业微信配置、首次绑定、换绑、离职和多身份冲突场景 |
+| 员工 Web 登录 | `PARTIAL` | `employee-web` 已接入 Edge 工号密码认证，浏览器会话由共享 `auth` 包管理；真实 Provider 快捷入口和 E2E 仍待完成 | 完成真实平台入口、跨浏览器 E2E 和生产会话策略 |
+| 长期/简易登录 | `PARTIAL` | BVS2-07 已实现短期 Access JWT、Refresh 轮换、重放撤销、当前会话和 Logout；员工 Web 已接入恢复流程，小程序平台存储适配已落地 | 完成在线验证，冻结 Web/小程序安全存储、改密/停用/管理员撤销失效规则 |
+| 员工命令幂等 | `PARTIAL` | 后端已支持稳定 command ID；员工 Web 已生成并提交客户端幂等键，重复点击由请求状态和按钮禁用控制 | 在 Node/浏览器和真实 Edge 环境验证重复提交、超时恢复和内容冲突 |
+| 员工命令状态查询 | `PARTIAL` | 后端已有 `GET /api/v1/commands/{commandID}`，员工 Web 已轮询并区分 pending/syncing/confirmed/failed | 在 Node/浏览器和真实 Edge 环境验证刷新恢复、失败重试和 Projection 延迟 |
 | OpenAPI 与生产认证一致 | `PARTIAL` | Core/Edge 已有 Bearer JWT；部分 OpenAPI 仍描述 `X-Actor-*` 或 `X-Employee-Public-ID` 调试头 | OpenAPI 将 Bearer JWT 作为生产合同，调试头标注为非 release 适配器或移出公共文档 |
 | 任务展示状态映射 | `PARTIAL` | 已约定业务状态与命令状态分层 | 完成状态字典、按钮可用性、过期/冲突/失败文案和刷新策略 |
 | Core/Edge 同步边界 | `DONE` | `/internal/sync/v1/*` 由 Worker 使用，浏览器不得调用 | API Client、环境变量和 E2E 加负向断言 |
-| 权限与 Scope | `PARTIAL` | Core 已有 Human Principal、RBAC、Scope 约束 | 将角色、Scope、401/403 和无数据状态转成前端可验证契约 |
+| 双入口数据一致性 | `PARTIAL` | BVS2-07 Mock 测试已验证两类 Provider 映射到同一 Staff；Core → Edge Projection 有同步基础，但双入口在线读取更新验证尚未完成 | 用同一 `StaffPublicID` 验证个人微信/企业微信读取、更新可见性和同步延迟提示 |
+| 权限与 Scope | `PARTIAL` | 用户已确认 manager 全量、leader 按团队/区域、staff 本人任务、admin 系统管理；Core 已有 Human Principal、RBAC、Scope 约束 | 将角色、Scope、401/403 和无数据状态转成最终 API 与前端可验证契约 |
 | 错误与请求追踪 | `PARTIAL` | 后端已有稳定错误码、request ID、trace ID 基础 | 冻结公共错误 Envelope、展示分级和支持人员排障字段 |
-| 前端工具链 | `PENDING` | `/frontend` 目前只有目录骨架，无 package/build/test 配置 | 冻结 Node 包管理器、TypeScript、构建、Lint、单测、E2E 和 CI 命令 |
-| Mock 与测试数据 | `BLOCKED` | 尚无首期业务 fixture、测试账号和双身份测试矩阵 | 为三客户端提供脱离真实外部微信的可重复 Mock/Contract/E2E 夹具 |
+| 前端工具链 | `PARTIAL` | Node.js v24.20.0、npm 11.19.0、pnpm 9.15.0 已配置；依赖已安装，lint/typecheck/test/build 已通过 | 补充 CI、完整 Mock/Contract/E2E 和浏览器冒烟 |
+| Mock 与测试数据 | `PARTIAL` | `frontend/preview/` 已提供零依赖页面和关键状态 Mock；尚无共享 fixture、测试账号和双身份测试矩阵 | 为三客户端提供脱离真实外部微信的可重复 Mock/Contract/E2E 夹具 |
 | 环境与域名 | `BLOCKED` | 小程序 HTTPS 域名、Web 域名、回调和证书尚未形成环境清单 | 形成 dev/test/prod 域名、回调白名单、TLS 和密钥注入清单 |
-| 视觉基线 | `PENDING` | 客户端形态已确定，视觉 token 和关键页面还未冻结 | 先冻结导航、任务列表、任务详情、命令反馈四类核心状态 |
+| 页面信息架构与角色工作区 | `PARTIAL` | 用户已确认独立页面、完整管理端模块、员工端任务/通知/异常/历史/账号入口和角色任务 Scope；`frontend/preview/` 已按独立入口实现骨架 | 完成最终页面地图、角色可见模块、团队/区域 Scope 交叉规则、越权/无数据表现和真实路由合同 |
+| 视觉基线 | `PARTIAL` | 已有“蓝调停机坪”第一版方向和预览，但用户要求继续美化，当前方案未作为最终视觉冻结 | 重新评审视觉方向、密度、导航层级和关键页面后再冻结 Token 与组件基线 |
+| 性能与动效预算 | `PENDING` | 已确定同步准确性优先和高成本特效默认禁止；指标、设备基线和自动化检查尚未建立 | 冻结 Web INP/LCP/CLS、资源体积、长任务、内存、帧率和小程序性能检查；关键操作不能被动画延迟 |
 
 ## 4. 当前禁止进入的工作
 
@@ -65,6 +71,7 @@
 - 不能让浏览器或小程序调用 `/internal/sync/v1/*`。
 - 不能因为前端页面需要而恢复 Core 的手工 `POST /tasks`、任意 PATCH 或硬删除语义。
 - 不能先写一套登录页面，再倒推个人微信、企业微信和员工 Web 的身份关系。
+- 不能先加入高成本动画，再用动画掩盖接口延迟、同步延迟或状态不确定性。
 
 ## 5. 进入真实业务的验收条件
 
@@ -78,21 +85,21 @@ F0 只有在以下条件全部满足后才能关闭：
 6. `/frontend` 工具链、共享 contracts/api-client/auth、Mock fixture 和最小 E2E 骨架可运行。
 7. 已准备脱离真实微信平台的双身份测试数据，并完成一次 API Contract + 三客户端冒烟验收。
 8. Docker 前置检查和项目统一验证入口可重复运行；未实际运行的验证不得标记为通过。
+9. 已按性能基线完成关键页面、长列表、重复操作、202 pending 和 Projection 刷新的性能与正确性验收。
 
-## 6. F0 下一步执行顺序
+## 6. 当前收尾执行顺序
 
-按以下顺序关闭，不跨步编写真业务页面：
+首个真实 Task Slice 的源码已经接入；剩余门槛按以下顺序关闭：
 
-1. 先冻结身份合同：登录通道、外部身份绑定和员工 Web 方案。
-2. 再冻结员工命令合同：幂等键、状态查询和失败恢复。
-3. 再修正 Core/Edge OpenAPI 与错误模型。
-4. 冻结 Task 生命周期和首期页面状态矩阵。
-5. 初始化 `/frontend` 工具链与共享契约包，接入 Mock。
-6. 最后做三客户端壳层和首个真实业务 Slice。
+1. 启动隔离的 Core/Edge/Worker 服务，完成 API Contract 和两个 Web 客户端最小浏览器冒烟验证。
+2. 完成真实个人微信/企业微信 Provider、小程序平台配置和管理端 SSO。
+3. 用隔离数据验证双入口同一 Staff、Scope、Projection 延迟、Command 幂等和失败恢复。
+4. 评审视觉、无障碍和性能基线，再扩展没有公开 API 的通知、异常、历史、人员、规则和报表模块。
 
 ## 7. 关联文档与代码证据
 
 - 前端设计：[memory-bank/frontend-design-document.md](../../memory-bank/frontend-design-document.md)
+- 页面设计：[frontend/docs/page-design.md](page-design.md)
 - 前端技术栈：[memory-bank/frontend-tech-stack.md](../../memory-bank/frontend-tech-stack.md)
 - 前端实施计划：[memory-bank/frontend-implementation-plan.md](../../memory-bank/frontend-implementation-plan.md)
 - 前后端交接：[docs/frontend-backend-handoff.md](../../docs/frontend-backend-handoff.md)
@@ -100,3 +107,12 @@ F0 只有在以下条件全部满足后才能关闭：
 - Edge OpenAPI：[api/edge/openapi.yaml](../../api/edge/openapi.yaml)
 - Core Task Query：`internal/core/application/flighttask/query.go`、`query_handler.go`
 - Edge 员工 Command：`internal/edge/application/server.go`
+
+## 2026-09-01 Command 契约收敛补充
+
+员工 Command 的两个 F0 阻塞项已经完成：
+
+- `POST /api/v1/tasks/{taskPublicID}/accept` 与 `/complete` 要求客户端提交稳定的 `command_id`；同一 ID 的重试忽略每次传输生成的 trace/time 元数据，只要业务内容一致即返回 `duplicate=true`，内容不一致返回 `409 command_id_conflict`。
+- 新增 `GET /api/v1/commands/{commandID}`，仅允许命令所属员工查询，返回 `pending`、`syncing`、`confirmed` 或 `failed`，并提供 attempts、下一次重试时间和安全的 `error_code`。
+- Edge `CommandRecord` 增加 `updated_at`；Memory Store、MySQL Store 和 Core Inbox 使用统一的逻辑命令等价判断。公共状态不会泄露持久化错误文本。
+- 已补充共享事件、Edge Store、Edge HTTP 的幂等/状态测试；客户端刷新恢复应直接查询该公开状态接口，不得读取 `/internal/sync/v1/*`。

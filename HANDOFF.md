@@ -1,8 +1,36 @@
 # Task Handoff
 
-> 更新时间：2026-08-31
-> 任务：Phase 2 BVS2-03 Flight → Task → Candidate
-> 说明：本文只记录本次任务实际状态；代码差异和测试结果以工作区与命令输出为准。
+> 更新时间：2026-09-03
+> 任务：项目级并行交接总览
+> 说明：本文顶部是当前全局索引；下方历史章节保留旧交接证据，不作为当前状态的唯一来源。各任务的最新快照位于 `memory-bank/handoffs/`。
+
+## 当前全局交接索引（2026-09-03）
+
+`HANDOFF.md` 是项目级总览，不再承载前端、后端和基础设施的全部详细过程。新会话应先读取对应任务快照，再按任务需要读取 `memory-bank/progress.md` 的相关里程碑。
+
+| 范围 | 当前状态 | 最新交接文件 |
+|---|---|---|
+| 前端 | F3 员工任务生命周期、Core 角色 Scope、Command 收据刷新恢复和 UTF-8 错误契约已完成；真实 Provider 适配器、原生小程序页面壳和管理端企业微信 SSO callback 已加入；生产凭据/域名、员工/管理员主数据预置、故障注入和最终品牌评审仍待完成 | [`memory-bank/handoffs/frontend.md`](memory-bank/handoffs/frontend.md) |
+| 后端 | BVS2-07、T0-1、T0-2、T0-3、T0-4、T0-5 已有代码/迁移；真实个人微信/企业微信 Provider 与管理端企业微信 SSO 服务已加入并默认关闭，Go 测试通过；生产凭据/域名、员工/管理员主数据预置和双副本 Compose/迁移/故障验收仍待补 | [`memory-bank/handoffs/backend.md`](memory-bank/handoffs/backend.md) |
+| 基础设施 | Foundation/BVS2-06 隔离闭环已有验证；标准镜像构建和性能门禁仍需推进 | [`memory-bank/handoffs/infrastructure.md`](memory-bank/handoffs/infrastructure.md) |
+
+### 交接更新规则
+
+- 用户表达“我要结束当前这个对话”“我要退出当前对话”“准备开新线程”等明确结束会话语义时，先更新本次任务对应的交接快照，再更新本索引。
+- 交接快照采用滚动更新，不无限追加重复内容；历史过程追加到 `memory-bank/progress.md`，过长后按阶段归档。
+- 同时进行多个任务时，各会话只更新自己负责的任务文件；跨范围内容分别同步，不覆盖其他会话的未提交修改。
+- 修改前必须重新读取目标交接文件、当前索引和 `git diff`；发现并发修改时先合并事实。测试或构建未运行时，必须明确写成“未运行”。
+
+### 2026-09-02 F2 真实员工端联调与 UTF-8 收敛
+
+- 隔离 Compose 项目 `frontend-live` 的 Core/Edge MySQL 使用当前源码 Core API、Edge API 和 Worker 完成到达生成、主任确认、Projection 同步、员工工号密码登录、Refresh/Me、Accept、Complete、Command 状态和重复命令验证；既有 `flight-*` 容器未触碰。
+- 员工 Web 浏览器已实际登录 `http://localhost:4175/login` 并读取 Edge Projection；任务中文在修复隔离测试数据后正常显示。Edge JSON 响应头为 `application/json; charset=utf-8`，MySQL 连接/表为 `utf8mb4`。
+- Web/API Client、微信小程序 `wx.request`、Edge→Core Identity HTTP、Worker→Edge Sync HTTP 的 JSON 请求头已统一声明 UTF-8；前端新增中文请求/响应测试，员工 Web Playwright E2E 已通过。个人微信/企业微信真实平台联调、员工/管理员主数据预置、完整异常场景 E2E 和视觉评审仍未完成。
+
+### 2026-09-01 文档清理结果
+
+- 已删除明确过时且不再作为实现依据的旧 B3 业务切片说明和根目录旧设计草案；当前以 `memory-bank/`、`docs/architecture/`、`docs/adr/` 和前端 F0 文档为准。未跟踪的 `memory-bank/architecture-design.md` 仍保留，删除需用户对该具体文件再次确认。
+- 旧 `cmd/server`、`internal/model`、`internal/store`、`internal/module` 及 `migrations/mysql` 代码/迁移现场仍保留为 legacy/paused，未删除业务代码或数据库迁移。
 
 ## 当前目标（已完成）
 
@@ -249,3 +277,60 @@ Phase 2  BVS2-05 Edge Projection → Employee Command IN PROGRESS
 - 已实际记录的验证包括 `go test ./...`、`go build ./...`、`scripts/verify.ps1 -Mode all`、Core/Edge 隔离 MySQL、双向 SQL/HTTP/Worker Probe、JWT 匿名拒绝和 Worker/Edge 故障恢复；正常 `docker compose up --build` 仍受 Docker Hub 基础镜像元数据 `EOF` 阻断。
 - 工作区包含本项目既有 v2 代码、配置、迁移、文档和前端骨架差异；`.bvs206-validation/` 仅为临时交叉编译验证二进制，已加入 `.gitignore`，不纳入提交。未执行删除、清库、`down -v`、migration down、分支切换或覆盖用户文件。
 - 下一次接手先重新读取 `memory-bank/project-memory.md`、`memory-bank/architecture.md`、`memory-bank/design-document.md`、`memory-bank/implementation-plan.md`、`memory-bank/progress.md`，然后从前端 F0 开始；任何验证前先运行 `scripts/ensure-docker.ps1`。
+- BVS2-07 Employee Identity & Session 已实现：Core 凭证、个人微信/企业微信绑定、一次性绑定票据、Edge Session、短期 JWT、Refresh 轮换/重放撤销、当前会话查询和 Logout 均已接线；没有接入真实第三方账号或提交生产密钥。
+- 关键代码：`internal/core/application/identity`、`internal/core/adapter/mysql/identity_repository.go`、`internal/edge/application/identity`、`internal/edge/adapter/mysql/session_repository.go`、`internal/integration/identity`；迁移为 Core/Edge 各自的 `000003`。
+- 已完成验证：Docker CLI 位于 `C:\Users\yuanfengleeeeee\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe`，前置检查通过；隔离项目 `bvs206-closure` 的 Core/Edge `000003` migration 已为 `applied`。`go test ./...`、`go build ./...`、`scripts/verify.ps1 -Mode all` 和当前源码 HTTP 联调均通过；真实微信/企业微信 Provider 仍未接入。
+- 下次接手优先补跑双库 `000003` migration 和 Core↔Edge HTTP 登录/绑定/刷新/撤销集成测试；继续保持旧 B3/B4/B5 现场不恢复，不执行 `down -v`、DROP/TRUNCATE 或 migration down。
+
+## 2026-09-01 BVS2-07 在线双库验收补充
+
+- 使用隔离 Compose project `bvs206-closure` 的 Core/Edge MySQL（3330/3331）完成 `000003_employee_identity` 与 `000003_employee_session` migration；未停止或修改 `flight-mysql`、`flight-redis`。
+- 使用当前源码临时 Core/Edge 进程完成真实 HTTP 验证：工号密码、个人微信/企业微信绑定与 exchange、单次 ticket、同一外部身份冲突、未映射拒绝、refresh 轮换/重放撤销、当前会话、logout、内部共享密钥和 Staff 停用 fail-closed 均通过。
+- 验证中发现并修复 MySQL Store 的 refresh replay 事务回滚问题；修复后替换会话在重放时已实际撤销。临时员工、凭据、绑定、ticket、Edge session 和 API 进程均已清理，Core/Edge 夹具残留计数为 0。
+- 修复后 `go test ./...`、`go build ./...`、`git diff --check` 均通过；没有执行 commit、push、`down -v`、DROP、TRUNCATE、migration down 或分支切换。
+- 下一步：与前端 F0 对齐身份/Command/OpenAPI 合同；真实 Provider、生产凭据、Command 状态查询和性能基线仍是产品化待办。
+
+## 2026-09-02 T0-1 可观测性实现完成
+
+- Core API、Edge API、Worker 已接入内部 `/metrics`；覆盖 HTTP 请求/延迟、数据库连接池、Core Outbox、Edge Command/Inbox backlog、oldest age、Projection lag，以及 Worker 投递/处理/确认延迟。
+- Core/Edge backlog 指标来自持久化 Store，Worker 指标来自同步操作；没有削弱 Outbox、Inbox、Command、幂等、版本、Retry 或 Failed 语义。
+- Docker 前置检查、受影响测试、`go build ./...`、运行时 metrics smoke、`scripts/verify.ps1 -Mode all` 均通过。真实代表性业务负载的 p50/p95/p99 尚未生成，因此没有把空跑结果写成性能结论。
+- 当前后端下一步为 T0-3：增加提交后 Notification/Fan-out Port；随后按固定负载决定批量拉取/确认、连接池、索引、Gateway 或多 Worker 是否必要。
+
+## 2026-09-02 T0-2 拉取恢复契约实现完成
+
+- Edge `GET /api/v1/tasks` 继续按员工 JWT Principal 返回完整 Projection 快照，增加 `snapshot_at`、`sync_mode=full_snapshot`、员工级持久化 `projection_revision`、Projection lag 状态、`next_cursor` 和 `reset_required`。
+- 空任务返回 HTTP 200 与空数组；取消/完成保留 Projection 终态；启动、刷新、重连、推送提示后的校准和离线恢复统一重新拉取快照。Command 使用稳定 `command_id` 和 `GET /api/v1/commands/{commandID}` 独立恢复。
+- Edge MySQL 新增 `000004_employee_projection_cursor`；当前不启用增量 API，`next_cursor=null`、`reset_required=false`，不得把单 Task `sync_version` 当员工全局 cursor。
+- 本轮 Docker 前置检查通过；Edge sync、Edge HTTP、迁移发现和 Worker 集成测试通过，最终 `scripts/verify.ps1 -Mode all` 也已通过（含全量 Go 测试、构建、Compose config 和 `git diff --check`）。真实业务负载 p50/p95/p99 仍未生成。
+
+下一步进入 T0-3：增加提交后 Notification/Fan-out Port，再按固定负载生成性能基线；不要自动执行 000004 之外的 migration down、清库或 `down -v`。
+## 2026-09-01 BVS2-07 后续：Employee Command 契约
+
+- 已完成员工 Accept/Complete 的客户端幂等键：请求必须携带稳定 `command_id`；同一逻辑命令重试返回 `duplicate=true`，业务内容冲突返回 `409 command_id_conflict`。
+- 已新增 `GET /api/v1/commands/{commandID}` 公共状态查询，仅命令所属员工可读，返回 `pending/syncing/confirmed/failed`、attempts、重试时间和安全失败码。
+- 已更新 Edge Memory/MySQL Store、Core/Edge Command 等价判断、Edge OpenAPI 以及单元/HTTP 测试；下一步可进入 `/frontend` API Client 接入。真实微信/企业微信 Provider 和 Task 生命周期待确认项不在本次变更内。
+## 2026-09-01 Employee Command 验收完成
+
+- 隔离 `bvs206-closure` Edge MySQL 的当前源码 HTTP/SQL 验收已通过：稳定 `command_id` 首次提交/重复提交分别返回 `duplicate=false/true`，状态查询返回合法公共状态，跨员工查询 403，同 ID 内容冲突 409。
+- 临时 Edge 进程和测试命令记录已清理；`go test ./...`、`go build ./...`、`scripts/verify.ps1 -Mode all`、OpenAPI YAML 解析和 `git diff --check` 均通过。未执行 commit/push。
+
+## 2026-09-02 T0-3 通知抽象和提交后边界实现完成
+
+- Edge 新增 `internal/edge/application/notification` Notification/Fan-out Port、`TaskChanged`、`Sink`/`Publisher` 和单实例员工隔离内存 fan-out；通知载荷不包含员工 ID。
+- 内部同步事件先完成 `ApplyEvent`，仅成功且非重复的任务事件在提交后发布；单连接失败继续投递其他连接，通知失败只记录日志/指标，不回滚 Projection 或改变 `202`。
+- 内存通知不是可靠队列；断线、重启、丢失和跨副本未命中由 `GET /api/v1/tasks` 完整快照及 `projection_revision` 恢复。
+- Docker 前置检查、定向 Go 测试和最终 `scripts/verify.ps1 -Mode all` 已通过；全量验证包含 `go test ./...`、`go build ./...`、Compose config 和 `git diff --check`。下一步为 T0-4 WebSocket 适配器。
+
+## 2026-09-02 T0-4 员工 WebSocket 提示实现完成
+
+- Edge 新增 `POST /api/v1/realtime/ticket` 与 `GET /api/v1/ws`，员工 JWT 通过 ticket 接口换取 30 秒一次性不透明 ticket，浏览器以 WebSocket 子协议传递；服务端只协商 `flight.realtime.v1`，不接受 URL 凭据。
+- WebSocket 适配器完成同源/协议握手、员工 Principal 绑定、`ready`/`ping`/`pong`、读写超时、空闲关闭、连接清理和 WebSocket 指标，并接入 T0-3 Notification Port。
+- employee-web 完成 ticket 获取、心跳回复、指数退避重连和通知 ID 有界去重；连接成功、重连和 `task_changed` 均触发完整任务快照刷新，HTTP 仍是最终读取和恢复路径。
+- Docker 前置检查、Go 定向测试、前端 `typecheck`、源码 `lint`、`test`（2 个测试文件、5 个测试）和 `build` 均通过；真实浏览器、服务重启/网络分区和多副本 fan-out 尚未验收。下一步进入 T0-5 Gateway 与共享 Edge 多副本。
+## Current session handoff (2026-09-03)
+
+- Core management SSO/session code, direct Enterprise WeChat/development provider adapters, Core migration `000005_admin_sso`, personnel/assignment read APIs, OpenAPI and frontend client contracts, and ADR-011 are present in the workspace.
+- Authorization remains Core-owned: provider authentication must resolve to a pre-provisioned active `admin_identity`; current role and scope are restored from the Core session. Production identity source, credentials, callback domains, and admin provisioning remain pending.
+- Docker Engine preflight succeeded in this session. The new migration has not been applied, and no destructive database or volume operation was run. Full verification status is recorded in `memory-bank/progress.md`.
+- Next session: run the full Go test/build checks, apply `000005_admin_sso` only to an isolated database, then exercise management SSO/personnel/assignment HTTP flows before production-provider, failure-recovery, and performance gates.

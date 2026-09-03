@@ -3,12 +3,18 @@ package main
 import (
 	"context"
 	"flag"
+	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	coremysql "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/adapter/mysql"
 	coreapp "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application"
+	coreadminauth "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/adminauth"
+	coreadminquery "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/adminquery"
 	coreflighttask "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flighttask"
+	coreidentity "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/identity"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/module/iam"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/clock"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/config"
@@ -50,20 +56,91 @@ func main() {
 	var confirmationService *coreflighttask.ConfirmationService
 	var cancellationService *coreflighttask.CancellationService
 	var taskQueryService *coreflighttask.TaskQueryService
+	var identityService *coreidentity.Service
 	if db != nil {
 		repository := coremysql.NewFlightTaskRepository(db)
 		arrivalService = coreflighttask.NewService(repository, clock.Real{})
 		confirmationService = coreflighttask.NewConfirmationService(repository, iam.NewAuthorizer(), clock.Real{})
 		cancellationService = coreflighttask.NewCancellationService(repository, iam.NewAuthorizer(), clock.Real{})
 		taskQueryService = coreflighttask.NewTaskQueryService(repository, iam.NewAuthorizer())
+		providerVerifier := coreidentity.ProviderVerifier(coreidentity.DisabledProviderVerifier{})
+		if cfg.Identity.RealProvidersEnabled {
+			remoteVerifier, verifierErr := coreidentity.NewRemoteProviderVerifier(coreidentity.RemoteProviderConfig{
+				PersonalWeChatAppID:  cfg.Identity.PersonalWeChatAppID,
+				PersonalWeChatSecret: cfg.Identity.PersonalWeChatSecret,
+				WeComCorpID:          cfg.Identity.WeComCorpID,
+				WeComAgentID:         cfg.Identity.WeComAgentID,
+				WeComSecret:          cfg.Identity.WeComSecret,
+			})
+			if verifierErr != nil {
+				log.Error("configure real identity providers failed", zap.Error(verifierErr))
+			} else {
+				providerVerifier = remoteVerifier
+			}
+		} else if cfg.Core.Mode != "release" {
+			providerVerifier = coreidentity.DevelopmentProviderVerifier{}
+		}
+		identityService = coreidentity.NewService(coremysql.NewIdentityRepository(db), providerVerifier, clock.Real{}, coreidentity.ServiceConfig{MaxLoginAttempts: cfg.Identity.MaxLoginAttempts, LockoutDuration: cfg.Identity.LockoutDuration(), BindingTicketTTL: cfg.Identity.BindingTicketTTL()})
 	}
-	authenticator, err := platformsecurity.NewJWTAuthenticator(cfg.JWT)
+	coreJWTConfig := cfg.JWT
+	coreJWTConfig.Audience += "-core"
+	authenticator, err := platformsecurity.NewJWTAuthenticator(coreJWTConfig)
 	if err != nil {
 		log.Error("configure core jwt failed", zap.Error(err))
 		return
 	}
-	server := coreapp.NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQuery(cfg.Core, db, rdb, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService)
+	var adminAuthService *coreadminauth.Service
+	var adminQueryService *coreadminquery.Service
+	if db != nil {
+		adminQueryService = coreadminquery.NewService(coremysql.NewAdminQueryRepository(db), iam.NewAuthorizer())
+	}
+	if db != nil && cfg.Identity.AdminSSOEnabled {
+		var adminProvider coreadminauth.Provider = coreadminauth.DisabledProvider{}
+		switch strings.ToLower(strings.TrimSpace(cfg.Identity.AdminSSOProvider)) {
+		case coreadminauth.ProviderOIDC:
+			adminProvider = &coreadminauth.OIDCProvider{
+				AuthorizeURL: cfg.Identity.AdminSSOAuthorizeURL,
+				TokenURL:     cfg.Identity.AdminSSOTokenURL,
+				UserInfoURL:  cfg.Identity.AdminSSOUserInfoURL,
+				ClientID:     cfg.Identity.AdminSSOClientID,
+				ClientSecret: cfg.Identity.AdminSSOClientSecret,
+				HTTPClient:   &http.Client{Timeout: 5 * time.Second},
+			}
+		case coreadminauth.ProviderWeCom:
+			adminProvider = &coreadminauth.WeComProvider{
+				CorpID:     cfg.Identity.WeComCorpID,
+				AgentID:    cfg.Identity.WeComAgentID,
+				Secret:     cfg.Identity.WeComSecret,
+				HTTPClient: &http.Client{Timeout: 5 * time.Second},
+			}
+		case coreadminauth.ProviderDevelopment:
+			// Development SSO is restricted by config validation to non-release
+			// environments and still requires a provisioned Core identity.
+			adminProvider = coreadminauth.DevelopmentProvider{CallbackSubject: cfg.Identity.AdminSSODevSubject}
+		}
+		adminAuthService = coreadminauth.NewService(coremysql.NewAdminAuthRepository(db), adminProvider, authenticator, clock.Real{}, coreadminauth.Config{
+			AccessTokenTTL:     cfg.Identity.AccessTokenTTL(),
+			SessionTTL:         cfg.Identity.SessionTTL(),
+			AbsoluteSessionTTL: cfg.Identity.SessionAbsoluteTTL(),
+			StateTTL:           cfg.Identity.AdminSSOStateTTL(),
+			Provider:           cfg.Identity.AdminSSOProvider,
+			SecureCookie:       cfg.Core.Mode == "release",
+			AllowedRedirectURI: splitConfigList(cfg.Identity.AdminSSOAllowedRedirect),
+		})
+	}
+	server := coreapp.NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuth(cfg.Core, db, rdb, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, cfg.Identity.InternalAPIKey, adminAuthService, adminQueryService)
 	if err := server.Run(ctx); err != nil {
 		log.Error("core api stopped with error", zap.Error(err))
 	}
+}
+
+func splitConfigList(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
 }

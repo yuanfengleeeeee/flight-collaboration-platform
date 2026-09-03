@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
+	"net/http"
+	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,6 +19,7 @@ import (
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/config"
 	platformlogger "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/logger"
 	platformmysql "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/mysql"
+	platformobservability "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/observability"
 	"go.uber.org/zap"
 )
 
@@ -54,7 +60,48 @@ func main() {
 		log.Error("create edge sync transport failed", zap.Error(err))
 		return
 	}
-	syncWorker := integrationsync.NewWorkerWithCommandProcessor(coreStore, commandProcessor, nil, transport, log, integrationsync.RetryPolicy{MaxAttempts: cfg.Sync.MaxAttempts, BaseDelay: time.Second}, cfg.Sync.BatchSize)
+	metrics := platformobservability.NewWorkerRegistry()
+	workerID := strings.TrimSpace(os.Getenv("FLIGHT_WORKER_ID"))
+	if workerID == "" {
+		hostname, hostnameErr := os.Hostname()
+		if hostnameErr != nil || strings.TrimSpace(hostname) == "" {
+			hostname = "worker"
+		}
+		workerID = fmt.Sprintf("%s-%d", hostname, os.Getpid())
+	}
+	syncWorker := integrationsync.NewWorkerWithCommandProcessor(coreStore, commandProcessor, nil, transport, log, integrationsync.RetryPolicy{MaxAttempts: cfg.Sync.MaxAttempts, BaseDelay: time.Second}, cfg.Sync.BatchSize).
+		SetWorkerID(workerID).
+		SetLeaseDuration(time.Duration(cfg.Sync.ClaimLeaseSeconds) * time.Second).
+		SetMetrics(metrics)
+	metricsAddr := strings.TrimSpace(os.Getenv("FLIGHT_WORKER_METRICS_ADDR"))
+	if metricsAddr == "" {
+		metricsAddr = ":9090"
+	}
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		syncWorker.RefreshMetrics(request.Context())
+		if sqlDB, statsErr := platformmysql.SQLDB(db); statsErr == nil {
+			platformobservability.RecordDBStats(metrics, "worker", sqlDB)
+		}
+		metrics.Handler().ServeHTTP(w, request)
+	}))
+	metricsServer := &http.Server{
+		Addr:              metricsAddr,
+		ReadHeaderTimeout: 5 * time.Second,
+		Handler:           metricsMux,
+	}
+	go func() {
+		if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Warn("worker metrics server stopped", zap.Error(err), zap.String("addr", metricsAddr))
+		}
+	}()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			log.Warn("shutdown worker metrics server failed", zap.Error(err))
+		}
+	}()
 	ticker := time.NewTicker(time.Duration(cfg.Sync.PollIntervalMS) * time.Millisecond)
 	defer ticker.Stop()
 	for {

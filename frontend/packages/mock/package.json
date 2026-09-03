@@ -1,0 +1,8 @@
+{
+  "name": "@flight/mock",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": { "@flight/contracts": "workspace:*" },
+  "exports": { ".": { "types": "./src/index.ts", "import": "./src/index.ts" } }
+}

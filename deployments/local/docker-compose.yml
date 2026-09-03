@@ -52,6 +52,7 @@ services:
       FLIGHT_CORE_PORT: 8081
       FLIGHT_EDGE_PORT: 8082
       FLIGHT_CORE_ALLOW_DEV_ACTOR_HEADERS: "true"
+      FLIGHT_IDENTITY_INTERNAL_API_KEY: change-me-local-identity-key
     depends_on:
       core-mysql: {condition: service_healthy}
     ports: ["8081:8081"]
@@ -75,9 +76,53 @@ services:
       FLIGHT_CORE_PORT: 8081
       FLIGHT_EDGE_PORT: 8082
       FLIGHT_EDGE_ALLOW_DEV_ACTOR_HEADERS: "true"
+      FLIGHT_EDGE_REDIS_ENABLED: "true"
+      FLIGHT_EDGE_REDIS_HOST: edge-redis
+      FLIGHT_EDGE_REDIS_PORT: 6379
+      FLIGHT_EDGE_INSTANCE_ID: edge-api-1
+      FLIGHT_IDENTITY_CORE_BASE_URL: http://core-api:8081
+      FLIGHT_IDENTITY_INTERNAL_API_KEY: change-me-local-identity-key
     depends_on:
       edge-mysql: {condition: service_healthy}
-    ports: ["8082:8082"]
+      edge-redis: {condition: service_healthy}
+
+  edge-api-2:
+    build:
+      context: ../..
+      dockerfile: deployments/local/Dockerfile
+      args: {TARGET: edge-api}
+    environment:
+      FLIGHT_CORE_DB_HOST: core-mysql
+      FLIGHT_CORE_DB_PORT: 3306
+      FLIGHT_CORE_DB_USERNAME: core_app
+      FLIGHT_CORE_DB_PASSWORD: change-me
+      FLIGHT_CORE_DB_DATABASE: flight_core
+      FLIGHT_EDGE_DB_HOST: edge-mysql
+      FLIGHT_EDGE_DB_PORT: 3306
+      FLIGHT_EDGE_DB_USERNAME: edge_app
+      FLIGHT_EDGE_DB_PASSWORD: change-me
+      FLIGHT_EDGE_DB_DATABASE: flight_edge
+      FLIGHT_CORE_PORT: 8081
+      FLIGHT_EDGE_PORT: 8082
+      FLIGHT_EDGE_ALLOW_DEV_ACTOR_HEADERS: "true"
+      FLIGHT_EDGE_REDIS_ENABLED: "true"
+      FLIGHT_EDGE_REDIS_HOST: edge-redis
+      FLIGHT_EDGE_REDIS_PORT: 6379
+      FLIGHT_IDENTITY_CORE_BASE_URL: http://core-api:8081
+      FLIGHT_IDENTITY_INTERNAL_API_KEY: change-me-local-identity-key
+      FLIGHT_EDGE_INSTANCE_ID: edge-api-2
+    depends_on:
+      edge-mysql: {condition: service_healthy}
+      edge-redis: {condition: service_healthy}
+
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      edge-api: {condition: service_started}
+      edge-api-2: {condition: service_started}
+    ports: ["${EDGE_GATEWAY_HOST_PORT:-8082}:80"]
 
   worker:
     build:
@@ -95,10 +140,12 @@ services:
       FLIGHT_EDGE_DB_USERNAME: edge_app
       FLIGHT_EDGE_DB_PASSWORD: change-me
       FLIGHT_EDGE_DB_DATABASE: flight_edge
-      FLIGHT_SYNC_EDGE_BASE_URL: http://edge-api:8082
+      FLIGHT_SYNC_EDGE_BASE_URL: http://gateway
+      FLIGHT_WORKER_METRICS_ADDR: ":9090"
     depends_on:
       core-mysql: {condition: service_healthy}
-      edge-api: {condition: service_started}
+      gateway: {condition: service_started}
+    ports: ["${WORKER_METRICS_HOST_PORT:-9090}:9090"]
 
   core-redis:
     image: redis:7-alpine
@@ -107,8 +154,12 @@ services:
 
   edge-redis:
     image: redis:7-alpine
-    profiles: [redis]
     ports: ["6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
   core_mysql_data:

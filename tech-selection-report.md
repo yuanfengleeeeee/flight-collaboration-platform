@@ -16,7 +16,8 @@
 - 数据库：Core MySQL 与 Edge MySQL 完全独立，使用版本化 SQL Migration。
 - 同步：HTTP Transport + Transactional Outbox + Inbox + Command Store + Retry，语义为 at-least-once 和幂等消费。
 - Redis：可选基础设施，只承担缓存、限流、短锁、在线状态和临时去重，不承担可靠事实或可靠消息投递。
-- 前端：已创建 `frontend/` 工作区目录骨架，包含 `admin-web`、`employee-web` 和共享包目录；页面、依赖、构建配置和移动端实现尚未落地。React、TypeScript、Vite、pnpm workspace 仍标记为提议方案。
+- 前端：已创建 `frontend/` 工作区目录骨架，包含 `admin-web`、`employee-miniapp`、`employee-web` 和共享包目录；页面、依赖和构建配置尚未落地。React、TypeScript、Vite、pnpm workspace 仍标记为提议方案。
+- 性能约束：同步准确性、消息可靠性和状态收敛优先于视觉装饰；前端只允许低成本、短时、可降级的动效，后端性能优化必须先测量且不得削弱 Outbox/Inbox/Command 可靠语义。
 - 部署：Docker Compose 作为本地开发和基础验证环境；生产部署、HA、备份、监控和密钥管理尚未全部落地。
 
 ## 2. 当前项目范围
@@ -38,7 +39,7 @@
 | cmd/edge-api | Edge DB、可选 Redis、Projection/Command/Inbox HTTP API 装配 | 已实现 |
 | cmd/worker | Core Outbox 投递、Edge Command 拉取和重试循环 | 已实现 |
 | cmd/migrate | 按 target core 或 edge 执行独立 SQL Migration | 已实现 |
-| 前端工程 | `frontend/` 工作区目录骨架 | 目录已创建；前端源码、依赖和构建配置尚未实现 |
+| 前端工程 | `frontend/` 工作区目录骨架 | 三个客户端和共享包目录已创建；前端源码、依赖和构建配置尚未实现 |
 
 ## 3. 技术栈总表
 
@@ -57,7 +58,7 @@
 | 测试 | Go unit、HTTP、Memory/显式 SQL integration test | 默认测试不清理用户数据库；数据库测试需要显式开启 |
 | 本地部署 | Docker Compose | core-api、edge-api、worker、core-mysql、edge-mysql；Redis 通过 profile 可选 |
 | Web 前端 | React + TypeScript + Vite（提议） | `frontend/apps/admin-web` 和 `frontend/apps/employee-web` 目录骨架已创建；尚无 package.json、页面源码和可执行构建 |
-| 移动端 | 首期按响应式 Web/PWA 设计（提议） | 员工端应用目录已创建；是否改为原生小程序仍待产品确认 |
+| 移动端 | 微信小程序（提议） | `frontend/apps/employee-miniapp` 目录骨架已创建；平台构建链、登录接线和页面尚未实现 |
 | 外部推送/AI/硬件 | Port 或桩预留 | 当前不接入真实账号、推送、模型、RFID/UWB |
 
 ## 4. 后端与服务架构
@@ -220,7 +221,9 @@ frontend/
 ├── apps/
 │   ├── admin-web/        # 管理端，只调用 Core API
 │   │   └── src/
-│   └── employee-web/     # 员工端，只调用 Edge API
+│   ├── employee-miniapp/  # 员工小程序，只调用 Edge API
+│   │   └── src/
+│   └── employee-web/     # 员工 Web 备用入口，只调用 Edge API
 │       └── src/
 ├── packages/
 │   ├── contracts/src/    # DTO、枚举、schema、错误码
@@ -299,6 +302,10 @@ Docker、数据库和 Compose 验证前必须先执行 Docker 前置脚本。本
 - CI/CD 发布权限和回滚流程；
 - RPO/RTO、容量压测和故障演练。
 
+### 9.4 性能与可靠性约束
+
+性能优化不得降低消息准确性、状态收敛和故障恢复能力。前端关键操作不能等待动画；默认只使用短时 `transform`/`opacity` 过渡，禁止高成本持续特效、全屏视频/WebGL/Canvas 粒子、复杂 3D、大面积 blur、动态渐变、全量列表 stagger 和大型动效资源。后端待办包括 API/数据库/Worker/同步链路基线测量、索引和查询计划、分页、连接池、有界并发、租约、批量投递、退避、payload 和 pprof 分析，详细清单见 `docs/performance-and-reliability-baseline.md`。
+
 ## 10. 选型决策与后续工作
 
 ### 10.1 现在可以直接执行的决策
@@ -314,7 +321,7 @@ Docker、数据库和 Compose 验证前必须先执行 Docker 前置脚本。本
 
 1. Web 管理端框架、移动端最终形态以及 React/Vite/pnpm 方案的正式冻结。
 2. 正式 JWT Middleware、登录身份源、Token 刷新和服务间认证。
-3. BVS2-05 的 Edge Projection 字段、版本规则和员工 Command 契约。
+3. 前端 F0/F1 工具链、性能预算和员工 Command 客户端契约。
 4. 生产数据库 HA、备份恢复、监控告警和密钥托管。
 5. OpenAPI 与实际路由、错误码、响应 envelope 的最终统一。
 

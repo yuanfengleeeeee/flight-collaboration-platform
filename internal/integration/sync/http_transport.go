@@ -47,10 +47,25 @@ func (t *HTTPTransport) PublishEvent(ctx context.Context, envelope sharedEvent.E
 }
 
 func (t *HTTPTransport) PullCommands(ctx context.Context, limit int) ([]edgesync.CommandRecord, error) {
+	return t.pullCommands(ctx, limit, "", 0)
+}
+
+func (t *HTTPTransport) PullCommandsWithLease(ctx context.Context, limit int, owner string, leaseDuration time.Duration) ([]edgesync.CommandRecord, error) {
+	return t.pullCommands(ctx, limit, owner, leaseDuration)
+}
+
+func (t *HTTPTransport) pullCommands(ctx context.Context, limit int, owner string, leaseDuration time.Duration) ([]edgesync.CommandRecord, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, t.baseURL+"/internal/sync/v1/commands/pending?limit="+strconv.Itoa(limit), nil)
+	query := url.Values{"limit": []string{strconv.Itoa(limit)}}
+	if strings.TrimSpace(owner) != "" {
+		query.Set("worker_id", owner)
+	}
+	if leaseDuration > 0 {
+		query.Set("lease_seconds", strconv.Itoa(int(leaseDuration/time.Second)))
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, t.baseURL+"/internal/sync/v1/commands/pending?"+query.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +87,19 @@ func (t *HTTPTransport) PullCommands(ctx context.Context, limit int) ([]edgesync
 }
 
 func (t *HTTPTransport) AcknowledgeCommand(ctx context.Context, commandID string, status string, reason string, nextAttempt time.Time) error {
+	return t.acknowledgeCommand(ctx, commandID, "", status, reason, nextAttempt)
+}
+
+func (t *HTTPTransport) AcknowledgeCommandWithLease(ctx context.Context, commandID string, owner string, status string, reason string, nextAttempt time.Time) error {
+	return t.acknowledgeCommand(ctx, commandID, owner, status, reason, nextAttempt)
+}
+
+func (t *HTTPTransport) acknowledgeCommand(ctx context.Context, commandID string, owner string, status string, reason string, nextAttempt time.Time) error {
 	path := "/internal/sync/v1/commands/" + url.PathEscape(commandID) + "/ack"
 	body := map[string]any{"status": status, "reason": reason}
+	if strings.TrimSpace(owner) != "" {
+		body["lease_owner"] = owner
+	}
 	if !nextAttempt.IsZero() {
 		body["next_attempt_at"] = nextAttempt.UTC()
 	}
@@ -89,7 +115,7 @@ func (t *HTTPTransport) doJSON(ctx context.Context, method string, path string, 
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	response, err := t.client.Do(ctx, request)
 	if err != nil {
 		return fmt.Errorf("sync request %s %s: %w", method, path, err)

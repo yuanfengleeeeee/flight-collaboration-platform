@@ -19,7 +19,35 @@ function Test-FileCandidate {
     }
 }
 
+function Get-ProjectDockerCli {
+    $pathFile = Join-Path $PSScriptRoot 'docker-cli-path.local.txt'
+    if (-not (Test-FileCandidate -CandidatePath $pathFile)) {
+        return $null
+    }
+
+    try {
+        $configuredPath = (Get-Content -LiteralPath $pathFile -Raw).Trim()
+        if ([string]::IsNullOrWhiteSpace($configuredPath)) {
+            return $null
+        }
+        # The final process invocation is the authoritative check. Keeping
+        # this explicit local override usable also helps restricted shells
+        # where probing a per-user installation returns Access Denied.
+        return $configuredPath
+    } catch {
+        # A stale or inaccessible local path must not prevent the normal
+        # PATH and Docker Desktop fallback discovery from running.
+    }
+
+    return $null
+}
+
 function Find-DockerCli {
+    $projectDockerCli = Get-ProjectDockerCli
+    if (-not [string]::IsNullOrWhiteSpace($projectDockerCli)) {
+        return $projectDockerCli
+    }
+
     $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
     if ($null -ne $dockerCommand) {
         return $dockerCommand.Source

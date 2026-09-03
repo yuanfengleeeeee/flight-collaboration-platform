@@ -20,16 +20,18 @@
 - `internal/integration/sync/worker.go` 通过 `CommandProcessor` 连接 Foundation 与业务 Core 命令处理，`cmd/worker` 在 Core MySQL 可用时注入业务 Repository。
 - Core 仍是 Task/Assignment/Personnel 唯一事实源；Edge 不因 HTTP 202 或本地点击直接把 Projection 改成最终业务状态，必须等待 Core Event 回传。
 
-## 前端工程设计基线（2026-09-01，DRAFT）
+## 前端工程设计基线（2026-09-02，F2 API INTEGRATION IN PROGRESS / VISUAL REVIEW OPEN）
 
-- 已创建 `frontend/` 前端工作区目录骨架，包含 `admin-web`、首期 `employee-miniapp` 和 `employee-web` 三个客户端目录，以及 contracts、API client、auth、UI、task-domain、Mock、E2E 和 docs 目录；应用源码和构建配置尚未实现。客户端不共享数据库或业务事实。
+- `frontend/` 已落地 pnpm workspace、React/Vite 的 `admin-web` 与 `employee-web`、contracts/API client/auth/task-domain/ui 共享包，以及 `employee-miniapp` 的原生 `wx.request`/存储适配层；`frontend/preview/` 仍是脱离后端的零依赖 Mock。客户端不共享数据库或业务事实。
 - `admin-web` 只调用 Core API；`employee-miniapp` 与 `employee-web` 只调用 Edge API。根目录原有空的 `web-admin` 和 `miniapp` 未作为新的 v2 前端入口使用。
 - 首期同时建设管理端和员工端：`admin-web` 采用桌面优先响应式 Web；员工端首期采用同时支持个人微信和企业微信入口的独立微信小程序，同时保留正式可用的 `employee-web` 网页版。小程序和网页版复用共享契约但不改变 Core/Edge 边界。
 - 个人微信与企业微信外部身份必须映射到同一个 Core Staff 事实；小程序只接收服务端签发的会话，不得把 openid、unionid 或企业微信用户标识直接当作业务身份，也不得自行伪造 `X-Employee-Public-ID`。
 - `admin-web` 只调用 Core API，面向任务工作台、Task 详情、Candidate 选择和 Leader/Manager Confirm；`employee-miniapp` 与 `employee-web` 只调用 Edge API，面向最小 Task Projection、Accept 和 Complete；网页版作为正式可用的直接浏览器入口。
 - `/internal/sync/v1/*` 永远不属于浏览器 API；`X-Actor-*`、`X-Employee-Public-ID` 只允许由显式开发适配器注入，不能作为生产身份方案。
 - 员工端将 `business_status` 与 Command 的 `pending/syncing/confirmed/failed` 显示层状态分离；202 Accepted 不会直接推进业务状态，必须等待 Core Event 回传后的 Edge Projection。
-- 详细设计、技术栈和分步实施计划分别位于 `memory-bank/frontend-design-document.md`、`memory-bank/frontend-tech-stack.md` 和 `memory-bank/frontend-implementation-plan.md`；当前状态均未冻结，正式认证、任务查询契约和客户端 Command 幂等键仍待确认。
+- 所有跨端文本统一使用 UTF-8：JSON 请求显式使用 `application/json; charset=utf-8`，服务端 JSON 响应带 UTF-8 charset，WebSocket JSON 和小程序网络请求遵守 UTF-8，Core/Edge MySQL 连接与表使用 `utf8mb4`；不得通过 Windows 默认代码页生成业务数据。
+- 性能约束为同步准确性、消息可靠性和状态收敛优先于视觉装饰；前端关键操作不能等待动画，默认只允许短时 `transform`/`opacity` 动效，后端优化必须先测量且不得削弱 Outbox/Inbox/Command、幂等和版本保护。
+- 页面详细设计位于 `frontend/docs/page-design.md`，真实 API 接入说明位于 `frontend/docs/api-integration.md`；用户已确认角色映射、团队/区域任务 Scope、管理端完整首期导航、员工端通知/异常/历史/账号入口和主任全量可见。管理端 Task List/Detail/Confirm/Cancel、SSO 回调适配与员工端 Edge 登录/Projection/Accept/Complete/Command Status 已有源码；真实 Provider 适配器也已加入，平台凭据、管理主体映射、回调域名和运行时验证仍待完成。
 
 ## Foundation 与 BVS2-04 实际代码地图（2026-08-31）
 
@@ -70,7 +72,7 @@ Probe 与 `architecture_probe_event` 只服务 dev/test Foundation 验证；BVS2
 
 ## 保留的历史现场
 
-审计前已存在且未跟踪的 `memory-bank/architecture-design.md`、`internal/module/event/` 和 `migrations/mysql/000003_task_instance_trigger_event_unique.*` 未被本轮覆盖或删除；它们属于旧 B1/B2/B3 现场，状态为 legacy/paused，不是 Architecture v2 规范，也不应作为新入口或新模块依赖。
+旧 B1/B2/B3 现场中的 `internal/module/event/` 和 `migrations/mysql/000003_task_instance_trigger_event_unique.*` 仍保留在工作区，状态为 legacy/paused，不是 Architecture v2 规范，也不应作为新入口或新模块依赖。旧 B3 业务切片说明已从项目文档目录删除；未跟踪的旧 v1 架构草案仍保留在工作区，等待用户对该具体文件是否删除作最终确认。相关历史状态只在本文件和 `memory-bank/progress.md` 中保留摘要。
 
 ## Legacy 原型实际状态（暂停，仅供审计；不是 Architecture v2 运行基线）
 
@@ -175,6 +177,7 @@ Architecture Foundation 已结束并冻结；BVS2-01 业务设计、BVS2-02 Core
 
 - Flight、Task、Personnel、Assignment、状态历史、Audit 和业务状态机事实只在 Core；
 - Edge 只保存员工执行所需的最小 Projection、Command、Session、Inbox 和 delivery 数据；
+- 员工首次使用工号 + 密码认证，个人微信和企业微信身份都绑定到同一个 Core `Staff`；绑定后的任一入口通过 Edge Session 读取同一份 Projection，长会话必须可刷新、可撤销且不能使用永久 JWT；
 - 员工接收/完成只能作为 Edge Command 由 Core Worker 拉取并由 Core 权限/状态机校验；
 - Core 业务事务、Audit 和 Outbox 必须保持同一事务；同步继续使用既有 at-least-once、Inbox 幂等、Retry/Failed 协议；
 - 业务 Handler/Service 不得直接跨模块查表、直接使用 GORM 或绕过 Repository/Application Port；
@@ -207,5 +210,72 @@ BVS2-06 首个实现步骤已完成；后续仍不得让 Edge 写 Core 事实，
 
 - 前端交付边界固定为三个客户端：`admin-web` 只调用 Core API；`employee-miniapp` 和正式支持的 `employee-web` 只调用 Edge API。所有前端运行时代码、构建配置、Mock、测试和 E2E 位于 `/frontend`。
 - 员工小程序同时支持个人微信和企业微信入口；两类外部身份必须由服务端映射到同一个 Core `Staff`，客户端不得把 openid、unionid、企业微信标识或 `X-Employee-Public-ID` 当作生产业务身份。
-- F0 的可验收门槛、当前差异和未决合同统一记录在 `frontend/docs/architecture-freeze-gate.md`。在双身份登录、员工 Web 登录、Command 客户端幂等/状态查询、OpenAPI 对齐、Task 生命周期和测试数据未冻结前，不进入真实业务页面实现。
+- F0 的工程验收门槛、当前差异和未决合同统一记录在 `frontend/docs/architecture-freeze-gate.md`。页面路由、线框、视觉 Token、状态矩阵和可访问性已由 `frontend/docs/page-design.md` 冻结；Command 客户端幂等/状态查询、OpenAPI 基础对齐、工具链、员工 Web 真实 API/浏览器联调已有源码与验证，异常恢复 E2E、管理端 SSO callback、真实 Provider 线上联调、环境域名和凭据仍待完成。
 - F0 身份合同提案位于 `frontend/docs/identity-contract-proposal.md`：外部微信/SSO 身份只用于登录和绑定，平台会话中的员工 `sub` 必须是服务端确认的 `StaffPublicID`；Core/Edge 不接受客户端伪造员工身份，也不把外部身份标识写入业务 Command。
+- BVS2-07 身份边界已落地：Core 持有 `employee_credential`、`external_identity_binding` 与一次性 `identity_binding_ticket`；Edge 仅持有最小 `mobile_session`，不直连 Core 身份表。Core 内部身份 Port 由共享密钥保护，开发环境仍只接受显式 `mock:<subject>`；真实 Provider 适配器已支持配置化个人微信 `code2Session` 和企业微信 `gettoken/getuserinfo`，但未配置生产凭据或执行线上联调。
+
+### 真实微信/企业微信与管理端 SSO 接入边界（2026-09-02）
+
+- 个人微信员工入口需要原生小程序：小程序调用 `wx.login()` 获取一次性 code，Core 后端用服务端 AppID/AppSecret 换取平台身份；AppSecret、session_key 不进入小程序或 Edge。
+- 企业微信员工入口可以采用企业微信 OAuth/H5 code，也可以配置企业微信容器内的小程序入口；后端统一将企业成员身份映射到 Core `Staff`，同一 Staff 可同时绑定个人微信和企业微信。
+- 管理端 SSO 是独立的浏览器企业微信 OAuth 流程（当前不依赖 OIDC，也可在未来增加其他 Provider），不需要开发管理端小程序；浏览器只处理一次性 code，后端负责 state、redirect、企业归属、管理角色校验并签发 Core audience 会话。
+- 因为没有 OIDC，员工账号、组织、凭证和微信绑定由 Core MySQL 的员工主数据模块承载；当前不新增第三套物理数据库，Edge 只保存移动端 Session/Projection/Command。
+- 真实 Provider 默认关闭，配置开关为 `identity.real_providers_enabled`；没有凭据、回调域名和管理用户映射时，不得宣称真实登录或 SSO 已完成。
+- 员工 Edge Session 使用短期 Access JWT（`sid` + Edge audience）和可撤销 Refresh Token；Refresh Token 只保存 SHA-256 摘要，轮换重放会撤销替换 Session。JWT 解析后由 Edge Session Resolver 校验本地 Session，并向 Core 查询 Staff active 状态；Core/Edge audience 分离。
+## 2026-09-01 Employee Command public contract
+
+- Edge employee Accept/Complete routes require a client-generated stable `command_id`; the Edge command store treats trace IDs and delivery timestamps as non-identity metadata while preserving payload/type/actor/aggregate conflict detection.
+- `GET /api/v1/commands/{commandID}` is the only public command status read model. It enforces employee ownership and maps internal pending/processing/retry/sent/failed states to `pending/syncing/confirmed/failed`; raw sync errors remain internal.
+- This status read model does not change the source-of-truth boundary: Core still validates and applies employee commands, and Edge only reports durable command delivery state until the Core event updates the projection.
+
+## T0 员工任务实时交付与 Edge 扩展决策（2026-09-02）
+
+- 当前 Edge 仍是一个逻辑服务，不按任务类型拆分；本地 Compose 已提供两个相同副本，使用共享 Edge MySQL 和 Gateway，员工请求不感知具体副本。
+- 员工获取任务的权威方式是带 JWT Principal 过滤的 `GET /api/v1/tasks`。前台 WebSocket `task_changed` 和 Redis 跨副本 fan-out 都只是提示通道，客户端收到后仍通过 HTTP 快照校准；后台平台通知仍待实施。
+- Core→Worker→Edge Inbox/Projection 仍是可靠事实同步链路。Projection 事务提交后才触发尽力而为的通知；推送可以丢失、重复、乱序，不能替代 Projection、Outbox/Inbox 或 Command status。
+- 多 Edge 副本只在实例内存维护自己的 WebSocket 连接；共享 SQL ticket 解决连接建立的副本无关性，Redis Pub/Sub 负责尽力转发提示，Redis 不可用时降级为 HTTP 拉取。
+- T0 实施顺序固定为：契约冻结、指标基线、拉取恢复契约、Notification Port、前台 WebSocket、Gateway+多 Edge/Worker、后台平台通知、故障/容量门禁。T0 不默认引入 Kafka、RabbitMQ、NATS、Service Mesh 或按任务拆分微服务。
+
+详细 ADR：`docs/adr/ADR-009-employee-task-realtime-delivery.md`。
+
+## T0-1 可观测性实现（2026-09-02）
+
+- Core API、Edge API 和 Worker 暴露内部 `/metrics`；HTTP 指标使用稳定的组件、方法、路由模板和状态标签，避免把任务 ID、员工 ID 或原始 URL 作为高基数标签。
+- Core Outbox、Edge Command/Inbox backlog、oldest age、Projection lag、数据库连接池压力，以及 Worker 投递/处理/确认延迟均可采集；队列数量来自持久化 Store，不依赖 Redis 作为可靠状态。
+- 该实现只建立观测能力，不代表已经完成代表性业务负载的 p50/p95/p99 性能基线；数值报告需在固定数据规模和负载参数后补齐。
+
+## T0-2 员工任务拉取恢复契约（2026-09-02）
+
+- Edge `GET /api/v1/tasks` 继续返回按 JWT Principal 过滤的完整员工快照，并增加 `snapshot_at`、`sync_mode=full_snapshot`、员工级持久化 `projection_revision`、Projection lag 状态、`next_cursor` 和 `reset_required`。
+- `projection_revision` 由 Edge Projection 的新增或更高版本更新递增；同版本幂等重放和过期版本不递增。它是员工范围的变化序列，不是单 Task `sync_version` 的全局替代品；当前增量 API 尚未开启，`next_cursor` 固定为 null。
+- HTTP 200 的空 `items` 是合法空快照；取消/完成任务以 Projection 中的终态为准。启动、刷新、重连、推送提示后的校准和离线恢复均重新拉取完整快照，客户端本地缓存不承担可靠恢复。
+- 公共 `GET /api/v1/commands/{commandID}` 继续负责稳定 Command ID 的状态查询和重试恢复；任务快照和 Command 状态是两条可分别恢复的读取路径。
+
+## T0-3 通知抽象和提交后边界（2026-09-02）
+
+- Edge 新增 `internal/edge/application/notification` Notification/Fan-out Port；业务 Handler 不直接依赖连接实现。首期 `InMemoryFanout` 只保存当前实例的员工→连接注册表，不保存业务事实。
+- `TaskChanged` 是最小 best-effort hint，包含通知 ID、任务公共 ID、任务 `sync_version`、变化原因和签发时间；员工公共 ID 只作为内部路由键，不进入 wire payload。单个连接失败时继续尝试其他同员工连接，并通过指标和结构化日志记录失败。
+- `/internal/sync/v1/events` 先完成 Edge Inbox/Projection 的 `ApplyEvent`，只有成功且非重复的任务事件才触发通知；通知构造或投递失败不回滚 Projection，也不改变事件已应用的 `202` 响应。重复 Event 不再次 fan-out。
+- 通知不是可靠队列。断线、重启、跨副本未命中或提示丢失时，客户端依靠 `GET /api/v1/tasks` 完整快照和员工级 `projection_revision` 校准；跨副本临时 fan-out 留待 T0-5。
+
+## T0-4 员工 WebSocket 提示实现（2026-09-02）
+
+- Edge 公共实时入口为 `POST /api/v1/realtime/ticket` 和 `GET /api/v1/ws`。ticket 接口要求员工 Bearer JWT；返回的短期一次性 ticket 只用于浏览器 WebSocket 子协议协商，不进入 URL、日志或业务消息。
+- WebSocket 握手继续校验 Edge JWT/sid 解析出的 Human Principal、同源 Origin 和 `flight.realtime.v1`；浏览器不能安全设置 Authorization 时，使用 `flight.realtime.ticket.{ticket}` 作为候选子协议，服务端只回显应用协议。
+- 连接适配器位于 `internal/edge/application/realtime`，负责员工级订阅、`ready`/`ping`/`pong`、读写超时、空闲关闭、连接清理和 WebSocket 指标。它只持有活跃连接，不保存任务事实。
+- `employee-web` 的 `RealtimeClient` 在连接成功、重连和 `task_changed` 后重新读取完整任务快照；notification ID 有界去重并支持指数退避。ticket 401 停止重连并交给会话恢复，WebSocket 不可用不阻塞任务读取和 Command status。
+- 代码级测试已覆盖 ticket 单次消费、JWT 员工隔离、握手、通知投递、心跳回复、重复提示去重、断线重连和空闲关闭；真实浏览器、服务重启、网络分区与多副本 fan-out 不在本轮验收结论内。
+## T0-5 Gateway 与共享 Edge 多副本实现（2026-09-02）
+
+- 本地 Compose 已增加 `gateway`、`edge-api` 和 `edge-api-2`；宿主机只暴露 Gateway 8082，两个 Edge 副本共享 Edge MySQL，Gateway 同时支持 HTTP/1.1 WebSocket Upgrade。
+- Edge realtime ticket 已抽象为 `TicketStorePort`，SQL 实现跨副本共享并只存 ticket hash；没有 Edge DB 时测试仍使用进程内短期 store。
+- Core Outbox 与 Edge mobile command 新增 `lease_owner`/`lease_expires_at`。Worker 以唯一 worker ID 领取并携带 owner 确认，过期可重新领取，旧 owner 确认不会覆盖新状态。
+- Edge Redis Pub/Sub 仅做跨副本 `task_changed` 提示 fan-out；本地投递先于 Redis 发布，Redis 失败不回滚 Projection，客户端继续依靠 HTTP 全量快照和 `projection_revision` 恢复。
+- 代码级租约、Worker 闭环和现有同步测试已通过；Docker CLI 当前不可用，双副本 Compose、迁移、实例停止和 Redis 分区尚未宣称验收通过。
+## 2026-09-03 Core management identity and read models
+
+- Core owns management identity provisioning and session state in `admin_identity`, `admin_sso_state`, and `admin_session`; Edge never stores or resolves management roles.
+- The management browser uses Core's authorization-code SSO endpoints. State is allow-listed, stored as a hash, consumed once in Core MySQL, and paired with an HttpOnly cookie. Core issues the Core-audience JWT only after resolving an active, provisioned admin/manager/leader identity.
+- Each management request re-resolves the current role and Team/Area/User scope from the Core session, so revocation and disablement fail closed without trusting stale JWT role claims.
+- Personnel and assignment list reads are application query ports with RBAC and server-derived scope. Query filters are bounded and cannot widen the principal's scope; the MySQL adapter is the only layer that builds the parameterized SQL.
+- OIDC credentials, callback domains, identity provisioning, and migration application are deployment work. See `docs/adr/ADR-011-admin-sso-and-management-read-model.md`.

@@ -257,7 +257,7 @@ func postSQLProbeCommand(ctx context.Context, baseURL string, command sharedEven
 	if err != nil {
 		return false, err
 	}
-	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	// The Compose probe opts into the development actor adapter explicitly;
 	// production Edge routes derive this identity from JWT instead.
 	request.Header.Set("X-Employee-Public-ID", command.ActorPublicID)

@@ -16,6 +16,7 @@ import (
 var (
 	ErrDuplicate         = errors.New("duplicate synchronization record")
 	ErrNotFound          = errors.New("synchronization record not found")
+	ErrLeaseLost         = errors.New("synchronization lease is no longer owned")
 	ErrCommandIDConflict = errors.New("command id was reused with different content")
 )
 
@@ -46,13 +47,25 @@ type ProbeEvent struct {
 }
 
 type OutboxRecord struct {
-	ID          uint64
-	Envelope    sharedEvent.EventEnvelope
-	Status      string
-	Attempts    int
-	NextAttempt time.Time
-	LastError   string
-	CreatedAt   time.Time
+	ID             uint64
+	Envelope       sharedEvent.EventEnvelope
+	Status         string
+	Attempts       int
+	NextAttempt    time.Time
+	LastError      string
+	CreatedAt      time.Time
+	LeaseOwner     string    `json:"-"`
+	LeaseExpiresAt time.Time `json:"-"`
+}
+
+type OutboxStats struct {
+	PendingCount     int64
+	FailedCount      int64
+	OldestPendingAge time.Duration
+}
+
+type OutboxStatsProvider interface {
+	OutboxStats(ctx context.Context, now time.Time) (OutboxStats, error)
 }
 
 type CoreTransaction interface {
@@ -70,6 +83,17 @@ type Store interface {
 	MarkOutboxRetry(ctx context.Context, eventID string, next time.Time, reason string) error
 	MarkOutboxFailed(ctx context.Context, eventID string, reason string) error
 	ProcessCommand(ctx context.Context, command sharedEvent.CommandEnvelope, execute CommandExecution) (duplicate bool, err error)
+}
+
+// LeasedStore is implemented by durable stores that coordinate multiple
+// workers with a database-backed lease. Store remains source-compatible with
+// the architecture probe and small test doubles; production workers prefer
+// this interface whenever it is available.
+type LeasedStore interface {
+	ClaimPendingOutboxWithLease(ctx context.Context, limit int, now time.Time, owner string, leaseDuration time.Duration) ([]OutboxRecord, error)
+	MarkOutboxSentWithLease(ctx context.Context, eventID, owner string) error
+	MarkOutboxRetryWithLease(ctx context.Context, eventID, owner string, next time.Time, reason string) error
+	MarkOutboxFailedWithLease(ctx context.Context, eventID, owner string, reason string) error
 }
 
 type MemoryStore struct {
@@ -106,20 +130,29 @@ func (s *MemoryStore) RunTransaction(ctx context.Context, fn func(CoreTransactio
 }
 
 func (s *MemoryStore) ClaimPendingOutbox(ctx context.Context, limit int, now time.Time) ([]OutboxRecord, error) {
+	return s.ClaimPendingOutboxWithLease(ctx, limit, now, "legacy", time.Nanosecond)
+}
+
+func (s *MemoryStore) ClaimPendingOutboxWithLease(ctx context.Context, limit int, now time.Time, owner string, leaseDuration time.Duration) ([]OutboxRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
 		limit = 20
 	}
+	if owner == "" {
+		return nil, fmt.Errorf("outbox lease owner is required")
+	}
+	if leaseDuration <= 0 {
+		leaseDuration = time.Minute
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	values := make([]OutboxRecord, 0, len(s.outbox))
 	for _, value := range s.outbox {
-		if (value.Status == sharedEvent.StatusPending || value.Status == sharedEvent.StatusRetry || value.Status == sharedEvent.StatusProcessing) && !value.NextAttempt.After(now) {
-			value.Status = sharedEvent.StatusProcessing
-			value.NextAttempt = now.UTC()
-			s.outbox[value.Envelope.EventID] = value
+		ready := (value.Status == sharedEvent.StatusPending || value.Status == sharedEvent.StatusRetry) && !value.NextAttempt.After(now)
+		expired := value.Status == sharedEvent.StatusProcessing && (value.LeaseExpiresAt.IsZero() || !value.LeaseExpiresAt.After(now))
+		if ready || expired {
 			values = append(values, value)
 		}
 	}
@@ -127,11 +160,25 @@ func (s *MemoryStore) ClaimPendingOutbox(ctx context.Context, limit int, now tim
 	if len(values) > limit {
 		values = values[:limit]
 	}
+	for index, value := range values {
+		value.Status = sharedEvent.StatusProcessing
+		value.NextAttempt = now.UTC()
+		value.LeaseOwner = owner
+		value.LeaseExpiresAt = now.UTC().Add(leaseDuration)
+		if owner == "legacy" {
+			value.LeaseExpiresAt = now.UTC()
+		}
+		s.outbox[value.Envelope.EventID] = value
+		values[index] = value
+	}
 	return values, nil
 }
 
 func (s *MemoryStore) MarkOutboxSent(ctx context.Context, eventID string) error {
-	return s.updateOutbox(ctx, eventID, func(value *OutboxRecord) { value.Status = sharedEvent.StatusSent; value.LastError = "" })
+	return s.updateOutbox(ctx, eventID, func(value *OutboxRecord) {
+		value.Status, value.LastError = sharedEvent.StatusSent, ""
+		value.LeaseOwner, value.LeaseExpiresAt = "", time.Time{}
+	})
 }
 
 func (s *MemoryStore) MarkOutboxRetry(ctx context.Context, eventID string, next time.Time, reason string) error {
@@ -140,6 +187,7 @@ func (s *MemoryStore) MarkOutboxRetry(ctx context.Context, eventID string, next 
 		value.NextAttempt = next.UTC()
 		value.Attempts++
 		value.LastError = reason
+		value.LeaseOwner, value.LeaseExpiresAt = "", time.Time{}
 	})
 }
 
@@ -148,6 +196,25 @@ func (s *MemoryStore) MarkOutboxFailed(ctx context.Context, eventID string, reas
 		value.Status = sharedEvent.StatusFailed
 		value.Attempts++
 		value.LastError = reason
+		value.LeaseOwner, value.LeaseExpiresAt = "", time.Time{}
+	})
+}
+
+func (s *MemoryStore) MarkOutboxSentWithLease(ctx context.Context, eventID, owner string) error {
+	return s.updateOutboxWithLease(ctx, eventID, owner, func(value *OutboxRecord) {
+		value.Status, value.LastError = sharedEvent.StatusSent, ""
+	})
+}
+
+func (s *MemoryStore) MarkOutboxRetryWithLease(ctx context.Context, eventID, owner string, next time.Time, reason string) error {
+	return s.updateOutboxWithLease(ctx, eventID, owner, func(value *OutboxRecord) {
+		value.Status, value.NextAttempt, value.Attempts, value.LastError = sharedEvent.StatusRetry, next.UTC(), value.Attempts+1, reason
+	})
+}
+
+func (s *MemoryStore) MarkOutboxFailedWithLease(ctx context.Context, eventID, owner string, reason string) error {
+	return s.updateOutboxWithLease(ctx, eventID, owner, func(value *OutboxRecord) {
+		value.Status, value.Attempts, value.LastError = sharedEvent.StatusFailed, value.Attempts+1, reason
 	})
 }
 
@@ -188,7 +255,7 @@ type commandInboxRecord struct {
 }
 
 func sameCommandEnvelope(left, right sharedEvent.CommandEnvelope) bool {
-	return left.CommandID == right.CommandID && left.CommandType == right.CommandType && left.SchemaVersion == right.SchemaVersion && left.ActorPublicID == right.ActorPublicID && left.AggregateID == right.AggregateID && sharedEvent.EqualPersistedTime(left.OccurredAt, right.OccurredAt) && left.TraceID == right.TraceID && sharedEvent.EquivalentJSON(left.Payload, right.Payload)
+	return sharedEvent.EquivalentCommand(left, right)
 }
 
 func (s *MemoryStore) PendingOutbox() []OutboxRecord {
@@ -200,6 +267,34 @@ func (s *MemoryStore) PendingOutbox() []OutboxRecord {
 	}
 	sort.Slice(values, func(i, j int) bool { return values[i].ID < values[j].ID })
 	return values
+}
+
+func (s *MemoryStore) OutboxStats(ctx context.Context, now time.Time) (OutboxStats, error) {
+	if err := ctx.Err(); err != nil {
+		return OutboxStats{}, err
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := OutboxStats{}
+	var oldest time.Time
+	for _, value := range s.outbox {
+		switch value.Status {
+		case sharedEvent.StatusPending, sharedEvent.StatusRetry, sharedEvent.StatusProcessing:
+			stats.PendingCount++
+			if oldest.IsZero() || value.CreatedAt.Before(oldest) {
+				oldest = value.CreatedAt
+			}
+		case sharedEvent.StatusFailed:
+			stats.FailedCount++
+		}
+	}
+	if !oldest.IsZero() && now.After(oldest) {
+		stats.OldestPendingAge = now.Sub(oldest)
+	}
+	return stats, nil
 }
 
 func (s *MemoryStore) ProbeEvents() []ProbeEvent {
@@ -229,6 +324,28 @@ func (s *MemoryStore) updateOutbox(ctx context.Context, eventID string, update f
 		return ErrNotFound
 	}
 	update(&value)
+	s.outbox[eventID] = value
+	return nil
+}
+
+func (s *MemoryStore) updateOutboxWithLease(ctx context.Context, eventID, owner string, update func(*OutboxRecord)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if owner == "" {
+		return fmt.Errorf("outbox lease owner is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.outbox[eventID]
+	if !ok {
+		return ErrNotFound
+	}
+	if value.Status != sharedEvent.StatusProcessing || value.LeaseOwner != owner {
+		return ErrLeaseLost
+	}
+	update(&value)
+	value.LeaseOwner, value.LeaseExpiresAt = "", time.Time{}
 	s.outbox[eventID] = value
 	return nil
 }

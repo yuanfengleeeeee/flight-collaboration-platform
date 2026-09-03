@@ -144,7 +144,7 @@ func TestRecordArrivalHandlerReturnsStableEnvelope(t *testing.T) {
 
 	body := `{"source_event_id":"http-source","occurred_at":"2026-08-31T08:00:00Z","actual_arrival_at":"2026-08-31T08:00:00Z","source":"manual"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/flights/flight-1/arrival", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {

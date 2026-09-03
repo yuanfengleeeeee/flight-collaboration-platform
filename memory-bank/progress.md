@@ -1,5 +1,13 @@
 # 项目进度
 
+## 2026-09-02 真实身份接入骨架与最终边界
+
+- 已实现个人微信/企业微信真实 Provider 适配器：Core 服务端可在配置开启后调用个人微信 `code2Session`、企业微信 `gettoken/getuserinfo`，并把外部身份映射到同一个 `Staff`；开发环境默认仍使用显式 `mock:<subject>`，真实密钥不进入客户端、日志或仓库。
+- 已实现员工原生小程序壳：`app.json` 注册登录、任务、任务详情和账号页；个人微信使用 `wx.login` 一次性 code，企业微信支持 OAuth/H5 或容器注入 code；工号密码登录和绑定流程保持可用。
+- 已实现管理端 SSO 前端 callback 适配与 Core 企业微信直连管理会话服务：生成并校验 state，回调只交换一次性 code，不把 Core JWT 放入 URL；Core 已有 `admin_identity`/`admin_sso_state`/`admin_session` 和 `/api/v1/admin/auth/sso/*` 路由。当前部署不依赖 OIDC，具体企业微信应用配置、管理员预置和生产联调仍待完成。
+- 已补充 [`frontend/docs/identity-provider-integration.md`](../frontend/docs/identity-provider-integration.md) 和架构/前后端交接记录，明确个人微信需要原生小程序入口、企业微信可用 H5/OAuth、管理端 SSO 不需要小程序。
+- 验证结果：Docker 前置检查在授权环境通过；`go test ./...`、前端 `pnpm typecheck`、`pnpm lint`、`pnpm test`（5 文件/13 测试）和 `pnpm build`（admin-web、employee-web）均通过。真实微信/企业微信和管理端 SSO 线上调用未执行，原因是尚未配置生产凭据、HTTPS 域名和管理员预置。
+
 ## 2026-08-10 Architecture v2 重构启动
 
 - A1 已按真实工作区完成：仓库根目录为 `C:/Users/yuanfengleeeeee/Desktop/flight-collaboration-platform`；当前分支为 `agent/foundation-and-handoff`；远程为 `origin`；旧 HANDOFF 记录的 `main` 分支和 Docker/Go 状态已过时。
@@ -234,3 +242,190 @@
 - 已审计当前身份基础：Core/Edge 可验证 Bearer JWT 并注入 `security.Principal`；外部身份 Provider、Staff 绑定、生产登录换取和 Principal Resolver 尚未接线；Edge 的 `mobile_session` 表当前没有对应登录用例。
 - 新增 `frontend/docs/identity-contract-proposal.md`，提出个人微信、企业微信、员工 Web 和管理端统一进入平台会话的边界：外部身份不作为业务主键，员工会话最终映射到同一个 `Staff`，Core/Edge 使用客户端隔离的 audience。
 - 提案暂不修改 migration、JWT 实现或第三方配置；当前仍等待平台主体/AppID、员工 Web 登录方式、首次绑定/换绑责任、Token 签发与撤销策略确认。
+
+## 2026-09-01 分任务交接文件策略
+
+- 已新增 `memory-bank/handoffs/README.md`，定义根 `HANDOFF.md` 总览与 `frontend.md`、`backend.md`、`infrastructure.md` 任务快照的职责边界。
+- 已创建当前前端、后端和基础设施交接快照；任务文件采用滚动更新，`memory-bank/progress.md` 继续保存按时间追加的里程碑和临时结果。
+- 已更新 `AGENTS.md`、`memory-bank/project-memory.md` 和根 `HANDOFF.md`：当用户说“我要结束当前这个对话”“我要退出当前对话”“准备开新线程”等明确结束会话语句时，先更新对应任务交接文件，再更新根索引，并按既有规则执行安全 GitHub 同步。
+- 已明确并发规则：同时读取不会冲突；写入前必须重新读取目标文件、根索引和 `git diff`，发现其他会话修改时先合并事实，不覆盖未知修改。
+
+## 2026-09-01 性能优先与动效限制
+
+- 已将“消息准确性、可靠同步、Core/Edge 状态收敛和故障可恢复性优先于视觉装饰”写入 `AGENTS.md`、`memory-bank/project-memory.md`、`memory-bank/architecture.md` 和前后端技术文档。
+- 已新增 `docs/performance-and-reliability-baseline.md`，明确三个前端客户端的动效限制、性能优化要求、暂定 Web 指标和后端 API/数据库/Worker/同步性能待办。
+- 已将性能与动效预算加入 `frontend/docs/architecture-freeze-gate.md` 和前端实施计划；当前没有前端可运行源码，未运行前端性能测试，文档中的指标均为待验证目标。
+
+## 2026-09-01 F0 用户身份体验需求确认
+
+- 用户已明确：员工首次进入小程序必须支持“工号 + 密码”登录；工号是平台登录账号，不以个人微信号或企业微信号替代。
+- 个人微信和企业微信都可以绑定同一个员工账号；两类身份最终指向同一个 Core `Staff`，任一入口读取的是同一份 Edge Projection，数据更新允许存在短暂同步延迟但不能形成两套事实。
+- 用户希望后续登录简单并尽量长时间保持登录；已匹配为已绑定入口快捷登录 + 短期 Access Token + 可刷新、可撤销的长期 Session，退出、改密、Staff 停用和管理员撤销必须能使会话失效。
+- 以上需求已补入 `frontend/docs/identity-contract-proposal.md`，并加入 F0 冻结门槛；当前后端仍缺少密码认证、身份绑定、刷新/轮换、登出撤销和双入口可重复验收实现，不能标记为已完成。
+
+## 2026-09-01 说明文档清理
+
+- 已删除明确过时且不再作为实现依据的 `design-document.md` 和 `memory-bank/business-slice-001.md`。未跟踪的 `memory-bank/architecture-design.md` 已确认属于旧 v1 草案，但因其是用户未提交文件且未获得针对该具体文件的再次删除确认，本轮保留。
+- 当前有效的架构、业务切片和技术基线分别以 `memory-bank/design-document.md`、`memory-bank/business-slice-v2-flight-task.md`、`docs/architecture/architecture-v2.md`、`tech-selection-report.md` 和 `tech-stack.md` 为准。
+- 本次未删除旧业务代码、旧 migration、当前交接文件、ADR、前端 F0 文档、PRD 或性能可靠性基线；它们分别承担 legacy 说明、决策记录、当前交接、前端设计、产品背景或长期约束职责。
+## 2026-09-01 BVS2-07 Employee Identity & Session
+
+- Core now owns `employee_credential`, `external_identity_binding`, and one-time `identity_binding_ticket` records. Password verification uses bcrypt, bounded failed-attempt lockout, active Staff checks, provider subject uniqueness, client-bound ticket consumption, and an `identity.bind` audit record.
+- Edge now exposes password login, provider exchange, binding completion, refresh rotation, current-session lookup, and logout. Edge stores only the minimum `mobile_session` record; refresh secrets are stored as SHA-256 hashes, access JWTs are short-lived and carry `sid`, and refresh replay revokes the replacement session.
+- Core and Edge use separate audiences (`<configured audience>-core` and `<configured audience>-edge`). Core identity calls are protected by the configured internal identity key. Development provider verification accepts only explicit `mock:<subject>` codes; no real WeChat/WeCom integration or production secret was added.
+- Added Core/Edge migration `000003`, service ports, HTTP handlers, OpenAPI contracts, and unit tests covering binding-required login, same-Staff provider exchange, ticket/client binding, rotation, refresh replay, logout, and session validation.
+- Verification: Docker preflight passed using the installed Docker CLI path; Core and Edge `000003` migrations reached `applied` on isolated project `bvs206-closure`. `go test ./...`, `go build ./...`, and `scripts/verify.ps1 -Mode all` passed. Current-source live HTTP verification covered both provider bindings/exchange, one-time ticket and conflict rules, refresh rotation/replay revocation, logout, internal-key protection, and inactive-Staff fail-closed behavior. During live verification, the MySQL refresh-replay transaction rollback was found and fixed; temporary employees, sessions, and API processes were cleaned up. Real WeChat/WeCom provider integration remains pending.
+
+## 2026-09-01 F0 页面设计完成
+
+- 新增 `frontend/docs/page-design.md`，冻结三端页面路由、外壳导航、认证/绑定/账号安全、管理端任务工作台与详情、员工任务列表与详情、命令反馈和空错状态。
+- 冻结“蓝调停机坪”视觉基线：航班条带 + 状态轨为统一识别元素；颜色、字体、间距、圆角、响应式断点、可访问性和 reduced-motion 规则已写明，且遵守同步准确性优先和高成本动效默认禁止的项目约束。
+- `memory-bank/frontend-design-document.md` 状态更新为 `FROZEN / F0 PAGE DESIGN`；工程工具链、真实微信/企业微信 Provider、Command 客户端幂等/状态查询、环境域名和在线联调仍由 `frontend/docs/architecture-freeze-gate.md` 管理，未因页面设计完成而提前关闭。
+- 根据当前工作区实际代码，校正身份文档为 BVS2-07 已完成本地 Mock Provider、工号密码、双身份绑定、Refresh 轮换和 Logout；真实第三方 Provider 仍未接入，但隔离 Docker 双库在线联调已在 BVS2-07 记录中完成。
+- 本轮为设计和文档变更，未运行前端构建/测试或 Docker/数据库验证。
+
+## 2026-09-01 F1 零依赖页面 Mock 预览
+
+- 新增 `frontend/preview/index.html`、`preview.css`、`preview.js` 和 `preview/README.md`，不引入外部依赖，页面文件全部位于 `/frontend`。
+- 预览已覆盖管理端任务工作台/详情、状态筛选、候选人确认/任务取消、员工端任务列表/详情、Accept/Complete 的 `pending → 已同步` 状态、账号绑定/登出，以及管理端/员工端登录页切换。
+- 视觉实现遵循已冻结的“蓝调停机坪”基线：航班条带、状态轨、深色管理导航、移动任务卡、响应式断点、键盘焦点和 `prefers-reduced-motion`。
+- 更新 `frontend/README.md`、`memory-bank/architecture.md`、`memory-bank/project-memory.md`、`memory-bank/frontend-design-document.md`、`memory-bank/frontend-implementation-plan.md`、`memory-bank/handoffs/frontend.md`、`docs/frontend-backend-handoff.md` 和根 `HANDOFF.md`，明确预览是 Mock，不代表真实 API/React/Vite 工程已完成。
+- 环境检查：未发现 Node/npm/pnpm，因此未运行正式前端 lint、typecheck、unit、build、E2E；本轮静态检查确认预览文件齐全、无尾随空格、关键交互标记存在，并用 Python 本地 HTTP 服务确认 `index.html`、`preview.css`、`preview.js` 均返回 HTTP 200。按项目规则执行 Docker 前置检查，但因环境找不到 `docker.exe` 以退出码 1 失败，未进行项目级功能/集成/Compose 验证。
+
+## 2026-09-01 F0 页面与权限信息架构重新讨论
+
+- 用户反馈当前预览存在结构性问题：管理端、员工端、登录页不应在一个预览壳中作为正式页面；管理端工作区不能只有任务工作台；页面需要体现项目文档中的更多业务模块；当前 Demo 没有表达任务级权限。
+- 新增待确认的权限核心：不同任务可归属不同队长，队长只查看自己管辖范围内的任务，主任可查看全部任务；需进一步确认“队长/主任”与现有 `leader/manager/admin` 的角色映射、Scope 字段、跨区域/跨团队边界、无权/无数据页面和后端授权合同。
+- 已将 `frontend/docs/page-design.md`、`memory-bank/frontend-design-document.md`、架构基线和前端交接状态改为 `REOPENED / F0 INFORMATION ARCHITECTURE DISCUSSION`；原有 Mock 保留为探索稿，不再宣称页面或视觉已冻结。
+- 后续重新设计顺序：先确认角色与任务可见范围，再梳理三端独立页面/路由，再从项目文档提取完整管理端工作区与首期范围，最后重新评审视觉美化和组件基线；确认前不继续扩展真实前端代码。
+
+## 2026-09-02 F0 信息架构确认与 F1 预览重构
+
+- 用户确认角色映射：主任=`manager`、队长=`leader`、员工=`staff`、系统管理员=`admin`；队长按照团队/区域自动获得任务，主任查看全部团队、区域、队长和任务。
+- 用户确认管理端首期完整保留项目规划中的工作区；没有真实内容的模块先显示空态，不删除导航、不伪造业务数据。员工端增加通知、异常、历史和账号入口。
+- 将探索预览拆分为页面地图、独立管理端登录、独立员工登录、独立管理端工作区和独立员工端工作区；管理端新增角色 Scope 视图、团队/区域上下文、完整分组导航和模块空态；员工端新增通知/异常/历史入口。
+- 本轮保留“蓝调停机坪”作为待评审视觉方向，用户要求的后续美化单独列为修改项；当前不把视觉 Token 标记为最终冻结。
+- 验证：按项目规则先执行 `scripts/ensure-docker.ps1`，但当前环境找不到 `docker.exe`，以退出码 1 失败；随后仅进行前端静态/本地 HTTP 资源检查，7 个 HTML/CSS/JS 入口均返回 HTTP 200，未进行项目级功能、数据库或 Compose 验证。
+## 2026-09-01 Employee Command 幂等与状态查询
+
+- 员工快捷 Accept/Complete 现在要求客户端提交稳定 `command_id`；同一逻辑命令重试时忽略 delivery trace/occurred_at 元数据，Edge 返回原命令状态和 `duplicate=true`；同 ID 不同业务内容返回 `409 command_id_conflict`。
+- 新增 `GET /api/v1/commands/{commandID}`，按员工身份校验归属，公共状态固定映射为 `pending/syncing/confirmed/failed`；返回 attempts、可选 next_attempt_at、created_at、updated_at 和安全的 `error_code`，不泄露原始后端错误。
+- Edge Memory/MySQL Store 增加 `FindCommand`、`updated_at` 和并发插入后的内容冲突检查；Core Memory/SQL/业务 MySQL Inbox 统一复用共享逻辑命令等价判断。
+- 已运行 `go test ./...`，全量通过。Docker 前置检查在受保护 Docker CLI 路径下通过；下一步为使用当前源码对隔离双库执行 Edge SQL/HTTP 幂等与状态查询验收。
+## 2026-09-01 Employee Command 验收完成
+
+- 已在隔离 Compose 项目 `bvs206-closure` 的 Edge MySQL 上使用当前源码完成 HTTP/SQL 验收：首次员工 Accept 返回 `duplicate=false`，同一 `command_id` 重试返回 `duplicate=true`；状态查询返回 `pending` 与时间字段；跨员工查询返回 403；同 ID 不同业务内容返回 409。
+- 临时 Edge API 进程、测试命令记录均已清理；既有 `flight-*` 服务和隔离 Compose 服务未停止或修改。Docker 前置检查、`go test ./...`、`go build ./...`、`scripts/verify.ps1 -Mode all`、Edge OpenAPI YAML 解析和 `git diff --check` 均已通过。
+
+## 2026-09-02 T0 员工任务实时交付方案入文档
+
+- 根据实时任务交付讨论，确认当前只有一个逻辑 Edge，Edge 不按任务类型拆分；多实例方向是相同 Edge 副本 + Gateway + 共享 Edge MySQL。
+- 确认员工端采用“推送提示 + 拉取校准”：`GET /api/v1/tasks` 仍是任务恢复和最终读取入口；未来前台增加 WebSocket `task_changed`，后台再接入经授权的平台通知，均不得替代 Projection、Outbox/Inbox 或 Command status。
+- 新增 `docs/adr/ADR-009-employee-task-realtime-delivery.md`，并将 T0 顺序同步到 `memory-bank/design-document.md`、`memory-bank/implementation-plan.md`、`memory-bank/architecture.md` 和 `memory-bank/project-memory.md`。
+- T0 顺序为：契约冻结、指标基线、拉取恢复契约、Notification Port、前台 WebSocket、Gateway 与多 Edge/Worker、后台平台通知、故障/容量门禁。持久消息 Broker 不作为默认 T0 依赖。
+- 本轮只修改文档，未实现 WebSocket、Gateway、多 Edge 或平台推送；因此没有新增功能验证结果，也没有执行 Docker/Compose 验证。
+
+## 2026-09-02 F2 前端真实 API 业务闭环源码落地
+
+- 在 `/frontend` 创建正式 pnpm workspace、TypeScript strict、Vite、Vitest、ESLint 配置，以及 `admin-web`、`employee-web`、`employee-miniapp` 和共享 contracts/api-client/auth/task-domain/ui/mock 包。
+- `admin-web` 已接入 Core Task List、Task Detail、Confirm、Cancel，任务 Scope 由 Core JWT/显式开发 Actor 决定，前端不本地扩大权限范围；Core 当前没有公开管理用户登录签发路由，页面保留 JWT/SSO 可替换适配点。
+- `employee-web` 已接入 Edge 工号密码登录、长期会话恢复（Access/Refresh/Me/Logout）、本人 Projection、Accept/Complete、客户端稳定 command ID 和 `GET /api/v1/commands/{commandID}` 状态轮询；202 只展示 pending/syncing，不直接改写业务状态。
+- `employee-miniapp` 已加入原生 `wx.request`、微信存储和共享 `SessionManager` 适配层；真实 AppID、通信域名、Provider code 回调和页面注册仍待平台配置。
+- 新增 `frontend/docs/api-integration.md`，说明本地 Vite `/core-api`/`/edge-api` 代理、认证限制、API 边界和待接入项；静态 Mock 继续保留在 `frontend/preview/`，不与正式源码混用。
+- 当前环境未发现 Node/npm/pnpm，正式依赖安装、前端 lint/typecheck/unit/build/E2E 尚未运行。代码变更后已执行 `git diff --check`，未发现 whitespace error；本轮尚未执行需要 Docker 前置的后端/数据库/Compose 联调。
+
+## 2026-09-02 T0-1 可观测性实现完成
+
+- 新增无强制第三方依赖的 Prometheus 文本指标 Registry，接入 Core API、Edge API 和 Worker 的 `/metrics`；Worker 指标服务仅监听 `/metrics` 路径。
+- 新增 Core Outbox 与 Edge Command/Inbox 的持久化 backlog、failed count、oldest age 和 Projection lag 统计；新增 HTTP、数据库连接池和 Worker 投递/处理/确认延迟指标。
+- 新增 observability、Core/Edge sync store、Worker metrics 测试；未改变可靠同步、幂等、版本收敛、Retry 和 Failed 语义。
+- 验证事实：Docker 前置检查通过；受影响测试、`go build ./...`、运行时 Core/Edge/Worker metrics smoke 和 `scripts/verify.ps1 -Mode all` 通过。运行时 smoke 使用临时无数据库写入配置，未启动或修改现有业务 Compose 服务。
+- 当前未宣称代表性业务负载下的性能基线；p50/p95/p99 报告待固定业务负载和数据规模后生成。下一步是 T0-2 拉取恢复契约。
+
+## 2026-09-02 F2 前端源码收尾核查
+
+- 补充了员工命令、管理端 Confirm/Cancel 的客户端幂等键复用：网络失败后的同一逻辑重试复用原 ID，业务内容变化或 409 冲突时重新建立新操作；客户端 ID 采用 UUID 形态以符合 Edge/Core OpenAPI。
+- API Client 增加对已提前取消请求的处理；小程序请求显式声明 JSON Content-Type；正式 Web 不再跳转旧版预览页面。
+- 已执行 `scripts/ensure-docker.ps1`，但当前环境找不到 `docker.exe`，以退出码 1 失败；Node、npm、pnpm、tsc、deno 均未发现，因此未运行前端依赖安装、lint、typecheck、unit、build、E2E 或在线联调。
+- 源码级 JSON 配置核查通过，`git diff --check` 通过（仅有 LF/CRLF 格式提示），未发现正式源码中的 `require()`、`transition: all`、旧版预览跳转或内部同步 API 调用。
+
+## 2026-09-02 Docker 环境恢复后的统一验证
+
+- 用户确认 Docker Desktop 已打开；提升权限检查确认 Docker Engine 就绪，路径为 `C:\Users\yuanfengleeeeee\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe`。
+- 已运行 `scripts/verify.ps1 -Mode all` 并通过：`go test ./...`、`go build ./...`、Docker Compose config 和 `git diff --check`。
+- 已运行只读 `scripts/verify.ps1 -Mode compose-ps` 并通过；当前没有运行中的项目 Compose 服务，未自动启动、停止或清理任何容器。
+- 前端 Node/npm/pnpm/tsc 仍未发现，因此前端依赖安装、lint、typecheck、unit、build、E2E 和浏览器联调仍未运行。
+
+## 2026-09-02 前端 Node 环境配置与构建验证
+
+- 用户授权下载并配置前端环境。Node.js 官方 Windows x64 v24.20.0 MSI 下载后因 Windows Installer 返回 1603 未采用；随后使用同版本官方 Windows x64 压缩包并校验 SHA-256，安装到当前用户目录 `AppData\Local\Programs\nodejs`。
+- npm 11.19.0 和项目声明的 pnpm 9.15.0 已安装；Node 目录及 npm 用户目录已写入当前用户 PATH。前端依赖安装成功，生成 `frontend/pnpm-lock.yaml`。
+- `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 全部通过；单元测试为 1 个测试文件、3 个测试，admin-web 和 employee-web 生产构建成功。
+- 本轮先修复了会话初始化的 TypeScript 循环推断问题，再通过全部前端检查。浏览器实际 API 联调、完整 E2E、小程序平台构建和真实微信/企业微信 Provider 仍待完成。
+
+## 2026-09-02 T0-2 拉取恢复契约实现
+
+- 保留 Edge 员工 JWT Principal 过滤的完整 `GET /api/v1/tasks`，响应增加 `snapshot_at`、`sync_mode=full_snapshot`、员工级 `projection_revision`、Projection lag 状态、`next_cursor` 和 `reset_required`。
+- 新增 Edge MySQL `000004_employee_projection_cursor` 及 Memory/SQL Store 支持；Projection 新增或高版本更新推进员工 revision，同版本/过期重放不推进，转派同时推进原员工和新员工。
+- 冻结客户端语义：HTTP 200 空数组是合法空结果；取消/完成使用 Projection 终态；启动、刷新、重连、推送提示后的校准和离线恢复重新拉取完整快照；Command 通过稳定 ID 和公共 status API 恢复；当前不启用增量 cursor。
+- 验证事实：已先运行 `scripts/ensure-docker.ps1`；受影响测试通过，随后 `scripts/verify.ps1 -Mode all` 通过，包含 `go test ./...`、`go build ./...`、Compose config 和 `git diff --check`。000004 migration 未自动应用，未执行破坏性数据库操作。
+
+## 2026-09-02 T0-3 通知抽象和提交后边界实现
+
+- 新增 `internal/edge/application/notification`：提供员工隔离的 `TaskChanged`、`Publisher`、`Sink` 和单实例 `InMemoryFanout`；员工 ID 仅用于内部路由，不进入通知 wire payload；单连接失败会继续尝试其他连接。
+- Edge `/internal/sync/v1/events` 先执行 `ApplyEvent`，只有投影成功且 Event 非重复时才构造并发布任务变化提示；通知失败只记录结构化日志和 `flight_notification_delivery_total`，不回滚 Projection、不改变事件已应用的 `202`。
+- 连接注册表是内存 best-effort 状态，不承担可靠消息存储；断线、重启、丢失和跨副本未命中由下一次 `GET /api/v1/tasks` 完整快照与 `projection_revision` 恢复。
+- 定向验证已通过：`go test ./internal/edge/application/notification ./internal/edge/application ./internal/platform/observability`；初次测试发现并修复了测试夹具对任务列表顺序的错误假设。文档同步后最终 `scripts/verify.ps1 -Mode all` 也已通过，包含全量 Go 测试、构建、Compose config 和 `git diff --check`。
+
+## 2026-09-02 T0-4 员工 WebSocket 提示实现
+
+- Edge 新增 `POST /api/v1/realtime/ticket` 和 `GET /api/v1/ws`：ticket 由员工 Bearer JWT 签发，30 秒内单次消费，浏览器通过 `Sec-WebSocket-Protocol` 传递；服务端只协商 `flight.realtime.v1`，不把 ticket 放入 URL 或响应协议。
+- `internal/edge/application/realtime` 已接入 Notification Port，完成同源和协议校验、员工 Principal 绑定、`ready`/`ping`/`pong`、读写超时、空闲关闭、连接清理和 WebSocket 指标。通知失败/连接丢失不影响 Projection，完整 HTTP 快照仍是恢复路径。
+- `employee-web` 新增 `RealtimeClient`，自动获取 ticket、指数退避重连、回复心跳、按 `notification_id` 有界去重，并在连接成功、重连和 `task_changed` 后重新拉取任务快照；ticket 401 停止重连并进入认证恢复路径。
+- Go 定向测试已通过：`go test ./internal/edge/application/realtime ./internal/edge/application ./internal/platform/httpauth ./internal/platform/observability`。前端 `typecheck`、源码 `lint`、`test`（2 个测试文件、5 个测试）和 `build`（admin-web、employee-web）已通过；首次 lint 失败是并行 build 生成的 `dist` 被递归扫描，已将 ESLint 忽略规则修正为 `**/dist/**`/`**/node_modules/**` 后复核通过。
+- 真实浏览器联调、服务重启/网络分区和多副本 fan-out 仍未验收；文档更新后的 `scripts/verify.ps1 -Mode all` 已通过。下一步进入 T0-5 Gateway 与共享 Edge 多副本。
+
+## 2026-09-02 F2 真实后端联调与 UTF-8 编码收敛
+
+- 按项目规则先执行 Docker 前置检查；隔离 Compose 项目 `frontend-live` 的 Core/Edge MySQL 保持健康，既有 `flight-mysql`、`flight-redis` 未触碰。当前源码 Core API `:8081`、Edge API `:8082`、Worker 已完成真实到达生成、主任确认、Outbox/Worker 投递、Edge Projection、员工工号密码登录、Refresh/Me、Accept、Complete、Command status 和重复命令闭环。
+- 员工 Web `http://localhost:4175/login` 已用隔离测试账号完成真实浏览器登录，并读取真实 Edge Projection。登录页静态中文和任务列表动态中文均显示正常；本次先发现隔离 fixture 中中文已被错误写成 `è”...`，随后使用明确 UTF-8 原始字节修复 Core/Edge 隔离测试数据，未改变业务结构或删除数据。
+- 诊断确认 Edge API 响应头为 `application/json; charset=utf-8`，MySQL session/连接和表为 `utf8mb4`；Windows 终端曾出现的乱码与 API 数据污染是两个独立问题。Web `ApiClient`、微信小程序 `wx.request`、Edge→Core Identity HTTP、Worker→Edge Sync HTTP 和测试请求头已统一显式使用 `application/json; charset=utf-8`。
+- 新增 `frontend/packages/api-client/src/client.test.ts` 覆盖中文 JSON 请求/响应；前端 `pnpm lint`、`pnpm typecheck`、`pnpm test`（3 文件/6 测试）、`pnpm build` 通过；Go `go test ./...`、`go build ./...`、`git diff --check` 通过。完整 Playwright E2E、真实微信/企业微信 Provider、管理端 SSO、WebSocket 真实握手和性能门禁仍待后续阶段。
+
+## 2026-09-02 员工 Web Playwright 与 WebSocket 浏览器验收
+
+- 新增 `frontend/playwright.config.ts` 与 `frontend/e2e/employee-web.spec.ts`；账号密码只从 `E2E_EMPLOYEE_NO`、`E2E_EMPLOYEE_PASSWORD` 环境变量读取，测试默认使用 `chrome` 通道，不把临时凭据写入仓库。
+- E2E 首次只验证登录和 Projection 时通过；加入 WebSocket `ready` 断言后发现 Vite 代理 `changeOrigin=true` 破坏 Edge 的同源 Host/Origin 校验。将员工 Web `/edge-api` 代理设为 `ws=true`、`changeOrigin=false`，并按 UTF-8 解码 Playwright WebSocket 帧。
+- 按项目规则先执行 `scripts/ensure-docker.ps1`；最终 `pnpm e2e` 通过（1 个场景，真实员工登录、UTF-8 中文 Projection、浏览器 WebSocket `ready`）。Edge 指标确认握手 `accepted=1`，连接断开由测试上下文结束产生的读错误，不影响握手验收。
+- 当前仍未完成 WebSocket 服务重启/网络分区、多副本 fan-out、异常恢复和 Command 生命周期 E2E；标准 Compose 镜像构建仍受 Docker Hub 基础镜像 EOF 影响，当前验证使用隔离数据库容器加当前源码进程。
+
+## 2026-09-02 员工端会话恢复、连接状态与视觉回归
+
+- `employee-web` 顶部连接提示改为由 `RealtimeClient` 的真实状态驱动，覆盖 connecting/open/retrying/closed/unauthorized；ticket 401 时清理员工会话并回到登录页，不再静态显示“已连接 Edge”。
+- 新增 `packages/auth/src/index.test.ts`，覆盖 Access Token 失效后的 Refresh 恢复、Refresh 失效后的安全清理和 binding ticket 与正式会话隔离；前端单元测试现为 4 个文件、9 个测试。
+- Playwright 员工 Web 场景增加页面刷新校验，验证 localStorage 会话恢复后仍能读取中文 Edge Projection；本轮 `pnpm e2e` 通过 1 个场景。
+- 首轮视觉回归已用本机 Chrome 检查员工登录页和真实任务页，收口了连接状态色、航班识别条、任务卡层次、触控尺寸和管理端表格/操作卡细节；最终品牌视觉仍待产品评审。
+- 按规则重新执行 Docker 前置检查并通过；`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 和 `git diff --check` 均通过。完整 401/403/404/409/503、Command 生命周期、服务重启/网络分区、多副本 fan-out、真实平台 Provider 和管理端 SSO 仍待后续验收。
+## 2026-09-02 T0-5 Gateway 与多副本实现
+
+- 已增加 `deployments/local/gateway/nginx.conf`、`gateway`、`edge-api-2`；Edge 宿主机固定端口移至 Gateway，Worker 同步地址改为 `http://gateway`，两个 Edge 使用同一 Edge MySQL。
+- Core `outbox_event` 与 Edge `mobile_command` 增加持久化 `lease_owner`/`lease_expires_at` migration；Worker、HTTP Transport、Edge pending/ack 路由已贯穿 owner 和租约时长。
+- realtime ticket 增加共享 Edge SQL 存储（仅保存 hash、一次性消费），Redis Pub/Sub 增加跨 Edge best-effort fan-out；Redis/通知失败不影响 Projection 和 HTTP 快照恢复。
+- 新增 Core/Edge 租约测试；本轮 `go test ./...` 在使用临时 `GOCACHE` 后通过。按规则执行 `scripts/ensure-docker.ps1`，但当前环境找不到 `docker.exe`，所以 Compose 配置、迁移应用、双副本/Redis 故障注入尚未验证，不能写成已通过。
+
+## 2026-09-02 F3 员工任务生命周期、角色 Scope 与刷新恢复 E2E
+
+- 先执行 `scripts/ensure-docker.ps1`，确认 Docker Engine 就绪；在隔离 Compose 项目 `frontend-live` 上新增一条 scheduled 测试航班 `FL-LIVE-002`，通过真实 Core 到达接口生成任务、主任 Confirm、Worker Outbox/Inbox 同步到 Edge。既有 `FL-LIVE-001` 和 `flight-*` 容器未清理。
+- `employee-web` 新增 Command 收据存储：发起 Accept/Complete 前先保存 `command_id`、Assignment、期望 Projection 版本和操作类型；收到 202 后保存状态，刷新后按同一 ID 查询；confirmed/failed/409 后分别清理或重新建立，不把 localStorage 当可靠消息队列。
+- Command 状态查询遇到临时网络/503 时最多自动重试 15 次；重试耗尽仍保留收据，刷新页面可以继续恢复查询，不把异常误报为业务完成。
+- 新增 `frontend/e2e/employee-task-lifecycle.spec.ts`、`frontend/e2e/core-task-scope.spec.ts` 和 `frontend/e2e/edge-error-contract.spec.ts`。真实隔离 E2E 已通过：基础员工登录/中文 Projection/WebSocket ready/刷新恢复、主任全局/正确 Scope 队长/错误 Scope 404、Accept→Command confirmed→Complete→刷新恢复已完成、Edge 401/403/404/409 错误契约。
+- `frontend/packages/api-client/src/client.test.ts` 增加 401 回调和非 JSON 503 稳定错误映射；新增 `TaskCommandStore` 2 个单元测试。前端 `pnpm test` 通过（5 个文件/13 个测试），`pnpm lint`、`pnpm typecheck`、`pnpm build` 通过。
+- 首次并行 E2E 因两条同名任务使基础用例标题断言触发 Playwright strict mode 失败，已改为按航班号限定任务卡；修复后基础场景单独复跑通过。该首次失败保留为过程事实，未伪称全套一次性通过。
+- 仍待：可重复创建的 CI 隔离夹具、503 浏览器级故障注入、服务重启/网络分区、多副本 fan-out/容量门禁、真实微信/企业微信 Provider、管理端 SSO 和最终品牌视觉评审。
+## 2026-09-03 P0 管理端身份、会话与管理查询代码落地
+
+- Core 新增管理端 SSO/会话边界：`admin_identity`、一次性 `admin_sso_state`、可撤销 `admin_session`，以及 OIDC authorization-code / 显式 development Provider 适配器。State 使用 redirect allow-list、HttpOnly cookie、哈希保存和 MySQL 一次性消费；Provider token 不下发浏览器；每次管理请求从 Core session 恢复当前角色与 Team/Area/User scope。
+- 新增 Core `GET /api/v1/personnel` 和 `GET /api/v1/assignments` 只读接口，Service 强制执行 RBAC 和 principal-derived scope，MySQL adapter 负责参数化查询；补齐 `api/core/openapi.yaml` 与前端 contracts/API client 类型。
+- 新增 Core `migrations/core/mysql/000005_admin_sso.up.sql`/`.down.sql`、`docs/adr/ADR-011-admin-sso-and-management-read-model.md`，并增加 adminauth/adminquery 单元测试。
+- 本轮 Docker 前置检查成功，CLI 为 `C:\Users\yuanfengleeeeee\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe`。第一次全量测试因默认 Go cache 权限被拒绝退出 1，切换到被 `.gitignore` 忽略的 `.tmp\\gocache-handoff` 后 `go test ./...` 与 `go build ./...` 均成功。
+- 最终 `scripts/verify.ps1 -Mode all` 通过，包含全量 Go 测试、构建、Compose config 和 `git diff --check`。Core `000005_admin_sso` 尚未应用，真实 OIDC/IAM、管理员预置、管理端完整业务 UI、双副本故障和性能门禁仍待后续。

@@ -83,6 +83,15 @@ func Principal(c *gin.Context) (security.Principal, bool) {
 	return security.Principal{}, false
 }
 
+// SetPrincipal is used by protocol adapters that authenticate before handing
+// control to an upgraded connection, such as the WebSocket ticket path.
+func SetPrincipal(c *gin.Context, principal security.Principal) {
+	if c == nil {
+		return
+	}
+	c.Set(principalContextKey, principal)
+}
+
 func DevelopmentActorHeadersAllowed(c *gin.Context) bool {
 	if c == nil {
 		return false

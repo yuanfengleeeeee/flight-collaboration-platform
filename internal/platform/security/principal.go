@@ -15,6 +15,7 @@ type Principal struct {
 	Type       PrincipalType
 	PublicID   string
 	Subject    string
+	SessionID  string
 	Roles      []string
 	Scopes     AccessScope
 	MachineUse string

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	sharedEvent "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/shared/event"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/shared/id"
@@ -113,3 +114,22 @@ var errTestRollback = &rollbackError{}
 type rollbackError struct{}
 
 func (*rollbackError) Error() string { return "test rollback" }
+
+func TestMemoryStoreReportsOutboxStats(t *testing.T) {
+	store := NewMemoryStore()
+	event, err := sharedEvent.NewEvent("probe.queue.v1", "probe", id.MustPublicID(), "test", map[string]string{"value": "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RunTransaction(context.Background(), func(tx CoreTransaction) error { return tx.AppendOutbox(context.Background(), event) }); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := store.OutboxStats(context.Background(), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.PendingCount != 1 || stats.FailedCount != 0 {
+		t.Fatalf("unexpected outbox stats: %#v", stats)
+	}
+}

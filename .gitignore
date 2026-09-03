@@ -46,3 +46,6 @@ frontend/**/coverage/
 
 # BVS2 临时验证产物
 .bvs206-validation/
+
+# Local Docker CLI installation path
+scripts/docker-cli-path.local.txt

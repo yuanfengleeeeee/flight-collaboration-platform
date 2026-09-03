@@ -15,8 +15,11 @@
 | 迁移 | 版本化 SQL + 独立 migrate 命令 | `migrations/core/mysql` 与 `migrations/edge/mysql` 分开；禁止启动 AutoMigrate |
 | 同步 | Transactional Outbox + Inbox + Command Store | at-least-once、幂等、重试、失败记录；暂不引入 Kafka/RabbitMQ |
 | 测试 | Go unit/HTTP/integration test | Probe 默认可在内存 fake 运行；数据库测试显式配置，不清空用户数据 |
-| 部署 | Docker Compose 本地 | `core-api`、`edge-api`、`worker`、`core-mysql`、`edge-mysql`；Redis profile 可选 |
-| 前端 | `frontend/` 工作区目录骨架已创建 | `admin-web`/`employee-web` 及共享包目录已落地；React + TypeScript + Vite + pnpm workspace 为 `PROPOSED`，前端只能通过 API 访问数据 |
+| 部署 | Docker Compose 本地 | `core-api`、`gateway`、`edge-api`、`edge-api-2`、`worker`、`core-mysql`、`edge-mysql`；Edge Redis 用于 best-effort fan-out，Core Redis 仍可选 |
+| 前端 | `frontend/` 工作区目录骨架已创建 | `admin-web`/`employee-miniapp`/`employee-web` 及共享包目录已落地；React + TypeScript + Vite + pnpm workspace 为 `PROPOSED`，前端只能通过 API 访问数据 |
+| 性能原则 | 先测量再优化；可靠同步优先于视觉效果 | 前端动效受性能预算约束；后端不削弱 Outbox/Inbox/Command、幂等和版本收敛 |
+
+详细的前端动画限制、性能预算和后端性能待办见 `docs/performance-and-reliability-baseline.md`。当前性能指标均为待验证目标，不代表已经完成压测或生产验收。
 
 ## 未来 Port（本轮禁用）
 

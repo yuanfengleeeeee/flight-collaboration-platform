@@ -50,7 +50,7 @@ Edge → Core 方向为：员工端调用 Edge API，Edge 将 Command 持久化�
 
 | 组件 | 实际职责 | 当前边界 |
 |---|---|---|
-| Core API | 内网管理端和 Core 业务事实入口；当前真实业务入口是航班到达处理 | 只连接 Core DB；当前 v2 HTTP 路由未接入 JWT/RBAC 中间件 |
+| Core API | 内网管理端和 Core 业务事实入口；当前真实业务入口是航班到达处理 | 只连接 Core DB；业务路由使用 Bearer JWT/RBAC，管理 SSO 通过 Core 管理会话解析，默认配置仍关闭 |
 | Edge API | 公网/移动端入口；读取 Edge Projection，持久化移动端 Command，提供内部同步 HTTP 接口 | 只连接 Edge DB；当前业务路由仍是 Foundation/Probe 级别 |
 | Worker | Core Outbox 投递到 Edge；主动拉取 Edge Pending Command；处理重试、失败和确认 | 只连接 Core DB，通过 Transport 访问 Edge，不连接 Edge DB |
 | Core MySQL | 航班、人员、岗位、能力、任务、分配、事件、规则、审计和状态机的唯一事实库 | 由 migrations/core/mysql 管理 |
@@ -96,9 +96,10 @@ Redis 只允许承担 cache、rate limit、短期锁、短期去重、在线状�
 | [frontend/apps/employee-miniapp](../frontend/apps/employee-miniapp) | 首期员工微信小程序目录；个人微信和企业微信共用，F1 创建源码和构建配置，只调用 Edge API。 |
 | [frontend/apps/employee-web](../frontend/apps/employee-web) | 正式员工网页版和备用入口目录；只调用 Edge API，当前尚未实现页面和构建配置。 |
 | [frontend/packages](../frontend/packages) | contracts、api-client、auth、ui、task-domain、mock 共享包目录；当前尚未实现源码。 |
+| [docs/performance-and-reliability-baseline.md](performance-and-reliability-baseline.md) | 性能优先级、前端动效限制、性能门禁和后端优化待办；当前指标为待验证目标。 |
 | [cmd/server](../cmd/server) | 旧单体入口，legacy/paused，不是 v2 生产入口。 |
 | [internal/server](../internal/server)、[internal/model](../internal/model)、[internal/store](../internal/store)、[internal/module](../internal/module) | 旧原型路由、模型、存储和 B3 现场，legacy/paused。 |
-| [migrations/mysql](../migrations/mysql)、[memory-bank/architecture-design.md](../memory-bank/architecture-design.md) | 旧单库 migration 和旧架构草案，legacy/paused。 |
+| [migrations/mysql](../migrations/mysql) | 旧单库 migration，legacy/paused；不得作为 v2 migration 或服务启动依据。 |
 
 ## 4. 当前已经实现的 API
 
@@ -766,12 +767,32 @@ frontend/
 
 根目录已有的 `web-admin` 和 `miniapp` 仍为空目录，未作为新的前端工程入口使用。
 
-- `admin-web` 只调用 Core API；当前可依赖的业务入口包括 `POST /api/v1/tasks/{taskPublicID}/confirm`、BVS2-03 Arrival 和已实现的 `POST /api/v1/tasks/{taskPublicID}/cancel`。Core 任务列表、详情和创建接口仍需后端契约。
+- `admin-web` 只调用 Core API；当前可依赖的业务入口包括 `GET /api/v1/tasks`、`GET /api/v1/tasks/{taskPublicID}`、`POST /api/v1/tasks/{taskPublicID}/confirm`、BVS2-03 Arrival 和已实现的 `POST /api/v1/tasks/{taskPublicID}/cancel`。手工创建、任意 PATCH 和硬删除仍未形成后端契约。
 - `employee-web` 只调用 Edge API；当前代码提供 `GET /api/v1/tasks`、`POST /api/v1/tasks/{taskPublicID}/accept` 和 `/complete`。Accept/Complete 返回 202 时只代表 Command 已进入 Edge Store，不能直接把业务状态改为 `in_progress` 或 `completed`。
 - Edge Projection 的业务状态由 Core 事件回传收敛，员工端 Command 的 `pending/syncing/confirmed/failed` 只作为显示层状态；浏览器不调用 `/internal/sync/v1/*`。
-- 当前员工 Actor 使用 `X-Employee-Public-ID`，Core Confirm 可使用 `X-Actor-*` 测试适配；两者均不是生产认证方案。正式 JWT/OIDC、员工身份来源、客户端 Command 幂等键和 Command 状态查询仍待确认。
+- BVS2-07 已提供员工工号密码、Provider exchange、绑定完成、Refresh 轮换、当前会话和 Logout；开发 Provider 只接受显式 `mock:<subject>`，真实微信/企业微信 Provider、客户端 Command 幂等键和 Command 状态查询仍待确认。`X-Employee-Public-ID` 与 `X-Actor-*` 仍只允许显式非 release 开发适配。
 - 首期同时建设管理端和员工端：管理端采用桌面优先响应式 Web；员工端首期采用同时支持个人微信和企业微信入口的 `apps/employee-miniapp`，同时保留正式可用的 `employee-web` 网页版。两类微信身份必须映射到同一个 Staff，两个员工客户端复用共享契约和任务展示模型。
-- 前端首期按 Mock-first 设计，未实现接口不得在生产构建中开放；具体页面、状态模型、技术栈和分步计划见 `../memory-bank/frontend-design-document.md`、`../memory-bank/frontend-tech-stack.md`、`../memory-bank/frontend-implementation-plan.md`。
+- 前端首期按 Mock-first 设计，未实现接口不得在生产构建中开放；页面路由、线框、视觉 Token 和状态模型见 `../frontend/docs/page-design.md`，主设计、技术栈和分步计划见 `../memory-bank/frontend-design-document.md`、`../memory-bank/frontend-tech-stack.md`、`../memory-bank/frontend-implementation-plan.md`。
+
+## 16. 2026-09-01 F1 页面 Mock 预览
+
+`frontend/preview/` 已提供零依赖静态探索 Mock 页面，用于在正式 React/Vite 工具链和真实 API 接入前暴露第一版页面结构问题。由于管理端/员工端/登录页不应合并在同一正式页面、管理端需要体现角色权限和更多工作区，本预览不再视为 F0 冻结依据。
+
+- 入口：[`frontend/preview/index.html`](../frontend/preview/index.html)
+- 启动：`python -m http.server 4173 --directory frontend/preview`
+- 边界：预览不请求 Core/Edge、不连接数据库，不代表真实登录或业务状态已经落库；正式客户端仍必须遵守 `admin-web → Core API`、员工小程序/员工 Web `→ Edge API`。
+
+## 17. 2026-09-02 F0 信息架构确认
+
+用户已确认首期前端信息架构：主任映射 `manager`，队长映射 `leader`，员工映射 `staff`，系统管理员映射 `admin`；队长按照团队/区域自动获得任务，主任可以查看所有团队、区域和任务。管理端首期完整保留运行总览、航班运行、任务中心、人员管理、规则、事件/通知、审计、报表和系统管理导航，即使某些模块暂时没有真实内容，也显示明确空态。员工端保留任务、通知、异常、历史和账号入口。
+
+当前 `frontend/preview/` 已拆分页面地图、管理端登录、员工登录、管理端工作区和员工端工作区。任务列表 Mock 会区分主任全量和队长团队/区域 Scope；该展示不替代 Core 后端权限校验。视觉美化列为后续独立修改项，最终页面路由、Scope 交叉规则和真实模块字段仍需完成 F0 最终评审。
+
+## 18. 2026-09-02 F2 首个真实前端闭环
+
+`frontend/` 已从目录骨架进入正式源码阶段：`admin-web` 通过 Core API 读取 Task List/Detail 并提交 Confirm/Cancel；`employee-web` 通过 Edge API 完成工号密码登录、可刷新会话、本人 Projection、Accept/Complete 和 Command Status 查询；`employee-miniapp` 已提供原生 `wx.request` 与存储适配器，共享同一 Edge 契约。
+
+本轮没有伪造管理端密码登录接口。Core 已提供默认关闭的管理 SSO authorization-code 路由、`admin_identity`/`admin_session` 会话存储、企业微信 Provider 和管理会话解析；当前部署不依赖 OIDC，管理端支持配置企业微信 SSO callback，也保留粘贴已签发 Core JWT 或显式非 release 开发 Actor Header。真实企业微信配置、员工/管理员主数据、回调域名和线上联调仍待完成。Node/npm/pnpm 已配置；员工 Web 的正式依赖安装、lint/typecheck/build、真实 API 浏览器联调、刷新恢复和基础 WebSocket E2E 已运行并通过，完整异常场景 E2E 和真实浏览器/小程序平台矩阵仍待补齐。详细运行说明见 [`frontend/docs/api-integration.md`](../frontend/docs/api-integration.md)。
 > BVS2-06 更新（2026-09-01）：Core POST /api/v1/tasks/{taskPublicID}/cancel 已实现并通过独立 Docker Core MySQL 验证；Task 列表/详情读侧、Compose/恢复验证和正式 JWT/mTLS 入口也已有对应代码或验证。当前 Task CRUD 仍遵循 Arrival 创建、GET 读侧、Confirm/Cancel 生命周期语义，手工 POST/PATCH/硬删除以及员工 Command 客户端幂等/状态查询仍待合同冻结。
 
 ## 2026-09-01 当前前端 F0 冻结校正
@@ -781,5 +802,38 @@ frontend/
 - Core 已有 Task 列表/详情读接口、Arrival 创建语义和 Task Cancel；手工 `POST /tasks`、任意 PATCH、硬删除仍未定义。
 - Core/Edge 业务入口在正常配置下使用 Bearer JWT；`X-Actor-*`、`X-Employee-Public-ID` 只允许显式非 release 开发适配器。
 - `employee-miniapp` 和 `employee-web` 都是正式前端边界内的员工客户端，只调用 Edge；个人微信和企业微信必须映射到同一个 Core `Staff`。
+- 用户已确认员工身份体验：首次进入小程序用工号 + 密码认证，之后个人微信和企业微信均可快捷进入同一个员工账号；任一入口看到同一份 Edge Projection，长会话必须可刷新、可撤销。BVS2-07 已提供本地 Mock Provider、密码登录、双身份绑定、Session 刷新/轮换和撤销接口，并已在隔离双库完成当前源码在线联调；真实微信/企业微信 Provider 仍待接入，详见 [`frontend/docs/identity-contract-proposal.md`](../frontend/docs/identity-contract-proposal.md)。
 - 员工快捷 Accept/Complete 当前返回 `202 pending`，客户端 Command 幂等键、公共 Command 状态查询和刷新恢复语义仍是 F0 阻塞项。
 - 前端架构冻结门槛和进入真实业务的验收条件见 [`frontend/docs/architecture-freeze-gate.md`](../frontend/docs/architecture-freeze-gate.md)。
+
+## 15. 性能与可靠性限制
+
+- 消息不丢失、重复消息无错误副作用、Core/Edge 状态正确收敛和故障可恢复性优先于视觉效果。
+- 管理端、员工小程序和员工 Web 的关键操作不能等待动画；默认只使用短时 `transform`/`opacity` 反馈，并支持 reduced motion。
+- 默认禁止高成本持续特效、全屏视频/WebGL/Canvas 粒子、复杂 3D、大面积 blur/backdrop-filter、动态渐变、全量列表 stagger 和大型动效资源。
+- 前端待优化代码分包、长列表、请求取消/去重、内存生命周期和小程序增量更新；后端待优化 API/数据库/Worker/同步链路指标、索引、分页、租约、有界并发、批量投递和性能剖析。
+- 以上指标和待办不是当前已完成的压测结果；详细要求见 [`docs/performance-and-reliability-baseline.md`](performance-and-reliability-baseline.md)。
+## 2026-09-01 员工 Command 契约已补齐
+
+后端已关闭 F0 中员工 Command 幂等和公共状态查询两个阻塞项。Accept/Complete 请求体现在必须包含客户端生成的稳定 `command_id`；相同 `command_id` 且业务内容一致时，Edge 返回 `202`、原命令状态和 `duplicate=true`，内容不一致返回 `409 command_id_conflict`。客户端刷新恢复使用 `GET /api/v1/commands/{commandID}`，响应 `data.status` 只使用 `pending`、`syncing`、`confirmed`、`failed`，并包含 `attempts`、可选 `next_attempt_at`、`created_at`、`updated_at`；失败只返回 `error_code=command_failed`，不返回内部错误文本。该查询必须携带员工 Bearer JWT，不能调用 `/internal/sync/v1/*`。
+
+## 2026-09-02 员工任务拉取恢复契约
+
+`GET /api/v1/tasks` 是按员工 JWT Principal 过滤的完整 Edge Projection 快照。响应包含 `sync_mode=full_snapshot`、`snapshot_at`、员工级 `projection_revision`、`projection_lag_seconds`、`projection_lag_state`、`next_cursor` 和 `reset_required`。当前没有增量 API，因此 `next_cursor=null`、`reset_required=false`；不得使用单 Task `sync_version` 拼接员工全局游标。
+
+客户端在启动、刷新、重连、收到变化提示和离线恢复时重新拉取快照并替换任务集合；HTTP 200 的空 `items` 是合法空结果，取消/完成以 Projection 终态为准。Projection lag 是观测信息，不是业务确认。本地缓存不作为可靠事实，Command 状态则以稳定 `command_id` 和 `GET /api/v1/commands/{commandID}` 独立恢复。Edge 部署前需按顺序应用 `migrations/edge/mysql/000004_employee_projection_cursor`。
+
+## 2026-09-02 T0-3 通知抽象和提交后边界
+
+后端已提供 Edge 内部 Notification/Fan-out Port：`internal/edge/application/notification` 暴露 `TaskChanged`、`Publisher` 和 `Sink`，当前实现为员工隔离的单实例内存 fan-out。T0-4 已在此 Port 之上增加 WebSocket 公共端点、连接鉴权、心跳、重连和快照恢复协议。
+
+后续前端 WebSocket 收到 `task_changed` 时只能将其视为刷新提示：载荷包含 `notification_id`、`task_public_id`、`sync_version`、`reason` 和 `issued_at`，不包含员工 ID；客户端应去重后重新调用 `GET /api/v1/tasks`，以完整快照和 `projection_revision` 替换任务集合。通知可能丢失、重复、乱序或因副本未命中而不可见，不能直接改变业务状态，也不能替代 Command status 查询。
+
+## 2026-09-02 T0-4 员工 WebSocket 提示
+
+Edge 对员工 Web 暴露：
+
+- `POST /api/v1/realtime/ticket`：使用员工 Bearer JWT 获取 30 秒一次性 ticket；ticket 只用于后续 WebSocket 子协议协商，不能放进 URL。
+- `GET /api/v1/ws`：提供 `flight.realtime.v1`，浏览器同时发送 `flight.realtime.ticket.{ticket}` 作为候选子协议；服务端只回显应用协议。握手要求同源 Origin 和已解析的员工 Human Principal。
+
+`employee-web` 已在 `packages/api-client` 提供 `RealtimeClient`，负责 ticket 获取、心跳回复、notification ID 有界去重和指数退避重连；连接成功、重连成功或收到 `task_changed` 时，页面重新拉取完整 `GET /api/v1/tasks`。WebSocket 关闭、ticket 过期或通知丢失不会阻塞任务读取和 Command status 恢复。Gateway、双 Edge、共享 SQL ticket 和 Redis best-effort fan-out 代码已接入，多副本 fan-out、服务重启和网络分区仍待 Docker 验收。

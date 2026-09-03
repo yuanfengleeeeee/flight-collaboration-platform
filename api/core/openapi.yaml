@@ -17,6 +17,191 @@ paths:
       responses:
         '200': {description: Ready}
         '503': {description: Required dependency unavailable}
+  /internal/identity/v1/password/verify:
+    post:
+      summary: Verify an employee password for the Edge identity boundary
+      description: Internal Core-owned contract. Requires X-Internal-Identity-Key in local shared-key mode.
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordVerifyRequest'}
+      responses:
+        '200':
+          description: Password verified or binding required
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PasswordVerifyResponse'}
+        '401': {description: Invalid credentials or internal identity key}
+        '403': {description: Staff is inactive}
+  /internal/identity/v1/staff/status:
+    post:
+      summary: Resolve the current active status of a Core Staff
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [public_id]
+              properties:
+                public_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Active Staff returned}
+        '403': {description: Staff is inactive}
+  /internal/identity/v1/providers/exchange:
+    post:
+      summary: Resolve a provider authorization code to a Core Staff
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProviderExchangeRequest'}
+      responses:
+        '200': {description: Staff identity resolved}
+        '403': {description: Provider identity is unmapped or staff is inactive}
+  /internal/identity/v1/bindings/complete:
+    post:
+      summary: Complete a Core-owned one-time external identity binding
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BindingCompleteRequest'}
+      responses:
+        '200': {description: Binding completed and Staff returned}
+        '401': {description: Invalid provider code or binding ticket}
+        '409': {description: External identity binding conflict}
+  /api/v1/admin/auth/sso/start:
+    get:
+      summary: Start management-console SSO
+      description: Creates a one-time server-side SSO state and redirects the browser to the configured OIDC provider.
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema: {type: string, minLength: 16, maxLength: 256}
+        - name: redirect_uri
+          in: query
+          required: true
+          schema: {type: string, format: uri}
+      responses:
+        '302': {description: Redirect to the configured management identity provider}
+        '400': {description: Invalid redirect URI or state}
+        '503': {description: SSO provider unavailable}
+  /api/v1/admin/auth/sso/exchange:
+    post:
+      summary: Exchange a management SSO authorization code
+      description: Consumes the server-side state and authorization code, resolves a provisioned admin identity, and issues a Core audience JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminSSOExchangeRequest'}
+      responses:
+        '200':
+          description: Management session issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminSSOExchangeResponse'}
+        '400': {description: Invalid SSO request}
+        '401': {description: Invalid or expired SSO state/code}
+        '403': {description: Admin identity is unmapped or inactive}
+        '503': {description: SSO provider unavailable}
+  /api/v1/admin/auth/me:
+    get:
+      summary: Get the current management session
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Current management session
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminSessionResponse'}
+        '401': {description: Missing, invalid, expired, or revoked management session}
+  /api/v1/admin/auth/logout:
+    post:
+      summary: Revoke the current management session
+      security: [{bearerAuth: []}]
+      responses:
+        '204': {description: Management session revoked}
+        '401': {description: Missing, invalid, expired, or revoked management session}
+  /api/v1/personnel:
+    get:
+      summary: List personnel visible to the authenticated management principal
+      operationId: listPersonnel
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: work_state
+          in: query
+          required: false
+          schema: {type: string, enum: [idle, reserved, busy, unavailable]}
+        - name: team_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: area_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: page
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Paginated personnel list
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PersonnelListResponse'}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks personnel read permission or scope}
+        '503': {description: Core repository unavailable}
+  /api/v1/assignments:
+    get:
+      summary: List Assignments visible to the authenticated management principal
+      operationId: listAssignments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        - name: task_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: personnel_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: page
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Paginated Assignment list
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssignmentListResponse'}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks Assignment read permission or scope}
+        '503': {description: Core repository unavailable}
   /api/v1/tasks:
     get:
       summary: List Core tasks visible to the authenticated human principal
@@ -289,6 +474,168 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    AdminSSOExchangeRequest:
+      type: object
+      required: [state, code, redirect_uri]
+      properties:
+        state: {type: string, minLength: 16, maxLength: 256}
+        code: {type: string, format: password}
+        redirect_uri: {type: string, format: uri}
+    AdminPrincipal:
+      type: object
+      required: [public_id, type, role]
+      properties:
+        public_id: {type: string, format: uuid}
+        type: {type: string, enum: [human]}
+        role: {type: string, enum: [admin, manager, leader]}
+    AdminSSOExchangeResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [state, access_token, token_type, expires_in, session_public_id, principal]
+          properties:
+            state: {type: string, enum: [authenticated]}
+            access_token: {type: string, format: password}
+            token_type: {type: string, enum: [Bearer]}
+            expires_in: {type: integer, format: int64}
+            session_public_id: {type: string, format: uuid}
+            principal: {$ref: '#/components/schemas/AdminPrincipal'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    AdminSessionResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [session_public_id, expires_at, principal]
+          properties:
+            session_public_id: {type: string, format: uuid}
+            expires_at: {type: string, format: date-time}
+            principal: {$ref: '#/components/schemas/AdminPrincipal'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    PersonnelListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/Personnel'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    Personnel:
+      type: object
+      required: [public_id, user_public_id, employee_no, display_name, area_public_id, team_public_id, position_code, capabilities, work_state, status_version, last_state_changed_at, enabled]
+      properties:
+        public_id: {type: string, format: uuid}
+        user_public_id: {type: string, format: uuid}
+        employee_no: {type: string}
+        display_name: {type: string}
+        area_public_id: {type: string, format: uuid}
+        area_name: {type: string}
+        team_public_id: {type: string, format: uuid}
+        team_name: {type: string}
+        position_code: {type: string}
+        capabilities: {type: array, items: {type: string}}
+        work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        last_state_changed_at: {type: string, format: date-time}
+        unavailable_reason: {type: string}
+        enabled: {type: boolean}
+    AssignmentListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/Assignment'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    Assignment:
+      type: object
+      required: [public_id, task_public_id, flight_public_id, flight_display_no, personnel_public_id, personnel_employee_no, personnel_name, area_public_id, team_public_id, status, status_version, confirmation_id, confirmed_by_public_id, confirmed_at, planned_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        task_public_id: {type: string, format: uuid}
+        flight_public_id: {type: string, format: uuid}
+        flight_display_no: {type: string}
+        personnel_public_id: {type: string, format: uuid}
+        personnel_employee_no: {type: string}
+        personnel_name: {type: string}
+        area_public_id: {type: string, format: uuid}
+        team_public_id: {type: string, format: uuid}
+        status: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        confirmation_id: {type: string}
+        confirmed_by_public_id: {type: string, format: uuid}
+        confirmed_at: {type: string, format: date-time}
+        accepted_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+        cancelled_at: {type: string, format: date-time}
+        cancel_reason: {type: string}
+        planned_at: {type: string, format: date-time}
+    PasswordVerifyRequest:
+      type: object
+      required: [employee_no, password, client]
+      properties:
+        employee_no: {type: string}
+        password: {type: string, format: password}
+        client: {type: string, enum: [employee-miniapp, employee-web]}
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_app: {type: string}
+    PasswordVerifyResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [state, staff]
+          properties:
+            state: {type: string, enum: [authenticated, binding_required]}
+            binding_ticket: {type: string, format: uuid}
+            staff: {$ref: '#/components/schemas/StaffIdentity'}
+    ProviderExchangeRequest:
+      type: object
+      required: [provider, provider_code, client]
+      properties:
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_code: {type: string, format: password}
+        client: {type: string, enum: [employee-miniapp, employee-web]}
+        redirect_uri: {type: string, format: uri}
+    BindingCompleteRequest:
+      type: object
+      required: [binding_ticket, provider, provider_code, client]
+      properties:
+        binding_ticket: {type: string, format: uuid}
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_code: {type: string, format: password}
+        client: {type: string, enum: [employee-miniapp, employee-web]}
+        redirect_uri: {type: string, format: uri}
+    StaffIdentity:
+      type: object
+      required: [public_id, employee_no, display_name, role]
+      properties:
+        public_id: {type: string, format: uuid}
+        employee_no: {type: string}
+        display_name: {type: string}
+        role: {type: string}
     FlightArrivalRequest:
       type: object
       required: [occurred_at, actual_arrival_at]

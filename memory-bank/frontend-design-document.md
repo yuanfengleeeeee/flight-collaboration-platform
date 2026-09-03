@@ -1,6 +1,6 @@
 # 前端工程设计基线
 
-> 状态：DRAFT，待产品/后端确认后冻结
+> 状态：`F0 INFORMATION ARCHITECTURE CONFIRMED / VISUAL REVIEW OPEN`；角色与页面边界已按用户确认更新，视觉方案仍待评审，工程接入门槛继续由 F0 Gate 管理
 > 更新时间：2026-09-01
 > 适用范围：航空保障智能协同平台 Web 管理端与员工移动端
 
@@ -38,9 +38,11 @@
 | `employee-web` | Staff（网页版） | Edge API | 正式可用的浏览器入口和备用入口；与小程序共用 contracts、task-domain、Mock 和 API 语义 |
 | `dev-preview` | 开发和联调人员 | Mock 或本地 API | 场景切换、重复点击、网络错误、乱序 Projection 和权限失败演示；不作为生产功能 |
 
-当前已创建 `frontend/` 目录骨架，包括管理端、首期员工小程序和员工 Web 三个应用目录、共享包目录、E2E 目录和前端文档目录；应用源码、依赖清单和构建配置仍将在 F1 创建。根目录原有的 `web-admin` 和 `miniapp` 目前为空，未作为新的前端入口使用。
+当前已创建 `frontend/` 目录骨架，包括管理端、首期员工小程序和员工 Web 三个应用目录、共享包目录、E2E 目录和前端文档目录；F1 已将 `frontend/preview/` 零依赖预览拆分为页面地图、独立登录页、管理端工作区和员工端工作区，正式应用源码、依赖清单和构建配置仍待创建。根目录原有的 `web-admin` 和 `miniapp` 目前为空，未作为新的前端入口使用。
 
 首期范围已确认：管理端和员工端同时建设。管理端固定采用桌面优先、可响应式收缩的 Web；基于企业内部入口过多、员工不愿新增软件或网页的痛点，员工端首期以同时支持个人微信和企业微信入口的微信小程序作为主入口，同时保留正式可用的 `employee-web` 网页版。最终认证和平台接线在 F0 冻结。
+
+员工身份体验补充要求已确认：小程序首次登录必须支持工号 + 密码；个人微信和企业微信可以绑定同一个员工账号，且任一入口读取同一份业务数据；绑定后优先提供简易登录和可撤销的长会话。BVS2-07 已实现对应的 Core/Edge 身份与会话边界，真实微信/企业微信 Provider 和在线双库验证仍未完成。详细页面设计见 [`frontend/docs/page-design.md`](../frontend/docs/page-design.md)，身份合同见 [`frontend/docs/identity-contract-proposal.md`](../frontend/docs/identity-contract-proposal.md)。
 
 ### 2.1 响应式 Web/PWA 与微信小程序选型
 
@@ -59,7 +61,7 @@
 | 发布与运维 | 静态资源部署后即可更新；PWA 可缓存资源，但需处理缓存版本 | 需遵守小程序审核、版本发布和平台配置流程 | 首期需求仍在验证，Web 发布节奏更适合快速联调 |
 | 网络与后端接入 | 生产需 HTTPS、CORS、缓存策略和浏览器权限；PWA 的 Service Worker 可改善资源加载和部分读场景 | `wx.request` 等网络能力要求配置通信域名并使用 HTTPS，不能直接依赖本地 IP/localhost | 当前本地联调先用 Mock；生产前必须准备小程序合法 HTTPS API 域名 |
 | 弱网/离线 | 可做离线壳、读缓存和“待提交”提示；不应把浏览器离线队列当作业务事实 | 也可做本地缓存，但仍受小程序生命周期和平台能力约束 | 两者都不能绕过 Edge 的持久化 Command；首期只做明确的 pending/syncing 展示 |
-| 身份与权限 | 可接正式 JWT/OIDC、企业 SSO 或浏览器会话 | 需要同时处理个人微信登录态、企业微信登录态、企业身份映射、AppID/环境和会话换取 | 两种外部身份最终都必须映射到同一个 Staff，不得生成两套员工事实 |
+| 身份与权限 | 当前采用正式 JWT、个人微信/企业微信身份映射和企业微信管理端 SSO | 需要同时处理个人微信登录态、企业微信登录态、企业身份映射、AppID/环境和会话换取 | 两种外部身份最终都必须映射到同一个 Staff，不得生成两套员工事实；未来其他身份源另行增加 Provider |
 | 原生能力 | 依赖浏览器能力，适合本项目当前的列表、详情和操作按钮 | 微信扫码、分享、工作台和消息卡片等入口更顺手，但带来平台耦合 | 入口价值已经成为员工端首期的主要决策因素 |
 | 维护与观测 | 一套 Web 调试、错误上报和 E2E 体系，可覆盖桌面和移动浏览器 | 需要增加小程序端调试、兼容性、发布版本和平台告警维度 | 首期应把精力放在 Core/Edge 契约、认证和同步语义上 |
 
@@ -94,6 +96,8 @@ employee-web    → 正式员工网页版 / 备用入口，与小程序共用业
 - 个人微信与企业微信的登录接线、企业归属校验和测试账号需要后端在正式认证方案中确认；当前开发 Header 仅保留给 Mock/本地联调。
 
 ## 3. 信息架构与页面
+
+页面级路由、线框、视觉 Token、响应式断点和状态矩阵已冻结，详见 [`frontend/docs/page-design.md`](../frontend/docs/page-design.md)。本节保留业务边界和页面职责，避免把视觉细节重复维护在两处。
 
 ### 3.1 管理端
 
@@ -182,7 +186,7 @@ idle → pending → syncing → confirmed
 | Client | 本地地址 | 当前可用业务接口 | 备注 |
 |---|---|---|---|
 | Core | `http://127.0.0.1:8081` | `POST /api/v1/flights/{id}/arrival`、`GET /api/v1/tasks`、`GET /api/v1/tasks/{id}`、`POST /api/v1/tasks/{id}/confirm`、`POST /api/v1/tasks/{id}/cancel` | 到达、列表/详情、Confirm、Cancel 已有当前代码；手工 `POST /tasks`、任意 PATCH 和硬删除不属于当前冻结合同 |
-| Edge | `http://127.0.0.1:8082` | `GET /api/v1/tasks`、`POST /api/v1/tasks/{id}/accept`、`POST /api/v1/tasks/{id}/complete`、`POST /api/v1/commands` | 正式配置使用 Bearer JWT；`X-Employee-Public-ID` 仅是显式非 release 开发适配器；公共 Command 状态查询和客户端幂等键仍待冻结 |
+| Edge | `http://127.0.0.1:8082` | 员工认证/绑定/刷新/当前会话/退出，以及 `GET /api/v1/tasks`、Accept、Complete、Command | BVS2-07 已提供工号密码、Provider exchange、绑定、Refresh 轮换和 Logout；真实微信/企业微信 Provider、公共 Command 状态查询和客户端幂等键仍待冻结 |
 
 `/internal/sync/v1/*` 只允许 Worker 调用，前端永远不调用。健康检查可以用于开发诊断，但不能作为业务可用性或登录成功的替代。
 
@@ -210,7 +214,7 @@ idle → pending → syncing → confirmed
 
 ## 6. 认证、授权与安全
 
-当前 v2 Core/Edge 业务路由已接入正式 Bearer JWT；`X-Actor-*` 与 `X-Employee-Public-ID` 仅在显式、非 release 的开发适配器中使用，不是生产身份来源。前端先实现抽象接口，并为个人微信、企业微信、员工 Web 和管理端分别提供可替换的认证适配器，不把测试 Header 封装成生产登录方案：
+当前 v2 Core/Edge 业务路由已接入 Bearer JWT；`X-Actor-*` 与 `X-Employee-Public-ID` 仅在显式、非 release 的开发适配器中使用，不是生产身份来源。BVS2-07 已接入员工工号密码、个人微信/企业微信绑定、Edge Session、Refresh 轮换和 Logout。前端仍通过抽象接口为个人微信、企业微信、员工 Web 和管理端提供可替换的认证适配器，不把测试 Header 封装成生产登录方案：
 
 ```text
 SessionProvider
@@ -218,13 +222,13 @@ SessionProvider
   → coreClient / edgeClient request context
 ```
 
-生产接线前必须由后端确认：个人微信/企业微信登录入口、外部身份到 Staff 的绑定关系、JWT/OIDC 或等价会话入口、Token 生命周期、Core/Edge 是否共享会话、Staff 与管理角色映射、Scope 传递方式和登出语义。身份合同提案见 [`frontend/docs/identity-contract-proposal.md`](../frontend/docs/identity-contract-proposal.md)。长生命周期凭据不放入 localStorage；开发环境的 Actor Header 仅在显式 dev flag 下启用，并且构建产物默认关闭。
+仍需后端/平台确认并完成联调：真实个人微信/企业微信 Provider、生产签名密钥与轮换、HTTPS 域名、Staff 与管理角色映射、Scope 传递方式和线上登出语义。身份合同见 [`frontend/docs/identity-contract-proposal.md`](../frontend/docs/identity-contract-proposal.md)。长生命周期凭据不放入 localStorage；开发环境的 Actor Header 仅在显式 dev flag 下启用，并且构建产物默认关闭。
 
 前端可以根据 Session 中的角色做导航和按钮隐藏，但所有写权限、对象 Scope、员工本人校验和状态机校验必须由后端再次执行。隐藏按钮不等于授权。
 
 ## 7. Mock-first 与契约管理
 
-由于当前仍存在身份、Command 幂等/状态查询和 OpenAPI 与实际路由的合同差异，前端先用 Mock 完成页面和状态机，再逐接口切换真实 API；Core 任务列表/详情/取消的基础实现已经存在：
+由于当前仍存在 Command 幂等/状态查询、部分 OpenAPI 与前端 DTO 以及真实微信平台接入的合同差异，前端先用 Mock 完成页面和状态机，再逐接口切换真实 API；Core 任务列表/详情/取消和 BVS2-07 员工身份基础接口已经存在：
 
 1. Mock 数据必须标注来源和假设，不伪造当前未实现接口已经存在；
 2. Mock handler 与真实 client 使用相同 DTO/错误归一化接口；
@@ -242,6 +246,18 @@ SessionProvider
 - 时间以服务端 ISO 8601 解析，按单机场时区展示；不要在客户端重新定义业务时间；
 - 错误提示展示稳定业务含义和 request/trace ID，禁止展示 token、密码或内部堆栈。
 
+### 8.1 性能优先的动效限制
+
+同步准确性、状态可追踪性和交互响应优先于视觉装饰。Confirm、Cancel、Accept、Complete、Retry 等关键操作不得等待动画，也不能用动画把本地点击伪装成业务成功。
+
+- 默认只使用短时 `transform`/`opacity` 过渡，并支持 `prefers-reduced-motion`；高频操作、键盘操作、轮询刷新和 Projection 更新尽量即时显示。
+- 禁止默认使用全屏视频/WebGL/Canvas 粒子、视差/鼠标跟随、复杂 3D、大面积 blur/backdrop-filter、动态渐变、无限循环装饰、大型 Lottie/SVG 和全量列表 stagger。
+- 不使用 `transition: all`，不动画化会触发布局的 `width`、`height`、`margin`、`padding`、`top`、`left`；不为每条任务记录创建常驻动画循环。
+- 列表、状态徽标和同步提示只突出实际变化的对象；不通过高频 shimmer 或整页转场掩盖慢接口。
+- 管理端、员工小程序和员工 Web 分别控制依赖、渲染范围和内存生命周期；共享包不得因为复用 UI 而把 Web 动画运行时带入小程序。
+
+具体性能预算、后端性能待办和验证方式见 [`docs/performance-and-reliability-baseline.md`](../docs/performance-and-reliability-baseline.md)。当前指标是待验证目标，不代表已经通过。
+
 ## 9. 验收标准
 
 前端设计进入实现门槛前必须满足：
@@ -255,9 +271,9 @@ SessionProvider
 - request ID、trace ID、Command ID 或幂等 ID 可用于联调定位；
 - 前端单元、契约、组件和关键端到端场景可独立运行。
 
-## 10. 冻结前待确认决策
+## 10. 工程接入待确认决策
 
-以下事项会影响实现入口，未确认前保持设计为 DRAFT：
+以下事项会影响工程接入和上线验收，但不再阻塞本文件的页面结构、视觉基线和交互状态设计：
 
 1. 微信小程序的个人微信、企业微信入口和身份适配是否按同一 AppID/同一业务端建设；需要根据平台主体和企业微信接入规则确认 AppID、通信域名、发布主体、工作台入口和两类外部身份到 Staff 的映射；
 2. Core 任务列表、详情、Arrival 创建和取消 API 的最终字段契约，以及 Confirm 是否继续使用当前命名；基础列表/详情/取消路由已经存在；
@@ -266,4 +282,7 @@ SessionProvider
 5. 生产环境 HTTPS、微信小程序 API 域名、个人微信/企业微信登录接线、CORS 和备用 Web 域名规划；
 6. 视觉品牌、主题色、字体和是否存在现有设计系统。
 
-F0 冻结门槛、当前状态和进入真实业务的验收条件统一维护在 [`frontend/docs/architecture-freeze-gate.md`](../frontend/docs/architecture-freeze-gate.md)。本设计文档在该门槛关闭前保持 `DRAFT`。
+F0 工程冻结门槛、当前状态和进入真实业务的验收条件统一维护在 [`frontend/docs/architecture-freeze-gate.md`](../frontend/docs/architecture-freeze-gate.md)。本文件的页面设计部分已冻结；工具链、Mock、真实 Provider、Command 合同和联调验收仍按 F0/F1 顺序推进。
+## 2026-09-01 员工 Command 契约补充
+
+员工 Command 契约已由后端收敛：Accept/Complete 请求必须携带客户端生成的稳定 `command_id`；公开状态查询为 `GET /api/v1/commands/{commandID}`，状态映射固定为 `pending`、`syncing`、`confirmed`、`failed`。前端重试使用同一 `command_id`，刷新后查询该接口恢复显示；不调用 Edge 内部同步接口，也不把 202 当作业务状态已完成。

@@ -1,0 +1,6 @@
+<view class="page-shell account-page">
+  <view class="eyebrow">ACCOUNT / SESSION</view>
+  <view class="title">我的账号</view>
+  <view class="card"><view class="muted">当前会话可通过 Refresh 长期保持，并可在服务端撤销。外部微信标识不会进入任务接口。</view><button class="button danger" loading="{{loading}}" bindtap="logout">退出当前设备</button></view>
+  <view class="bottom-nav"><navigator class="bottom-nav__item" url="/pages/tasks/index">任务</navigator><navigator class="bottom-nav__item active" url="/pages/account/index">账号</navigator></view>
+</view>

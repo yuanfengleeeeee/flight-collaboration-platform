@@ -1,6 +1,6 @@
 # 前端身份合同提案
 
-> 状态：`PROPOSED / F0 REVIEW`
+> 状态：`PARTIAL / BVS2-07 IMPLEMENTED / F0 INTEGRATION REVIEW`
 >
 > 更新时间：2026-09-01
 >
@@ -8,12 +8,12 @@
 
 ## 1. 审计结论
 
-当前代码已经具备“校验平台 JWT 并注入 `security.Principal`”的基础，但还没有完成外部身份接入闭环：
+当前代码已经完成员工身份基础闭环的本地实现，但真实微信/企业微信 Provider 和线上环境验证仍未完成：
 
-- `RequireJWT` 可以校验 Bearer Token，并将解析结果放入 Gin Context；生产入口由 JWT 认证，开发 Header 只是显式非 release 适配器。[`internal/platform/httpauth/middleware.go`](../../internal/platform/httpauth/middleware.go:26)
-- `core-api` 和 `edge-api` 当前都直接创建 JWT Authenticator；没有外部 Identity Provider、Staff 绑定流程或已接线的 Principal Resolver。[`cmd/core-api/main.go`](../../cmd/core-api/main.go:60)、[`cmd/edge-api/main.go`](../../cmd/edge-api/main.go:50)
-- Edge 员工请求最终使用 `Principal.PublicID` 过滤 Projection；没有 Principal 时才会尝试读取开发 Header。[`internal/edge/application/server.go`](../../internal/edge/application/server.go:285)
-- Edge migration 已有 `mobile_session` 表，但当前没有对应的登录换取和会话管理用例。[`migrations/edge/mysql/000001_edge_foundation.up.sql`](../../migrations/edge/mysql/000001_edge_foundation.up.sql:70)
+- Core 已持有员工凭证、外部身份绑定和一次性绑定票据；密码使用 bcrypt，失败次数受限并支持停用员工校验。[`internal/core/application/identity`](../../internal/core/application/identity)
+- Edge 已提供工号密码登录、Provider exchange、绑定完成、Refresh 轮换、当前会话和 Logout；员工 Session 使用 Edge audience 的短期 JWT 和可撤销 Refresh Token。[`internal/edge/application/identity`](../../internal/edge/application/identity)
+- Core/Edge 身份数据通过独立的 `000003` migration 落地；Edge 不读取 Core 身份表，而是通过受保护的内部 Identity Port 调用 Core。[`migrations/core/mysql/000003_employee_identity.up.sql`](../../migrations/core/mysql/000003_employee_identity.up.sql)、[`migrations/edge/mysql/000003_employee_session.up.sql`](../../migrations/edge/mysql/000003_employee_session.up.sql)
+- 开发 Provider 只接受显式 `mock:<subject>`，真实个人微信/企业微信校验、生产非对称签名和在线双库验证尚未完成。[`internal/integration/identity`](../../internal/integration/identity)
 
 因此，前端不能自行把 `openid`、`unionid`、企业微信用户标识、员工号或姓名转换成 `StaffPublicID`。
 
@@ -126,13 +126,13 @@
 
 管理端对 Core Task 的确认/取消、员工在任一入口发出的 Accept/Complete，最终都通过既有 Core Event → Edge Projection 链路收敛。用户可能短时间看到旧状态，这是可靠同步的可见延迟，不是两套数据；前端必须展示刷新/同步状态，不能用本地结果覆盖服务端状态。
 
-## 5. 建议的公共认证合同
+## 5. 公共认证合同
 
-以下是待后端确认的最小形状，不代表当前接口已经实现：
+以下是 BVS2-07 已落地的公共 Edge 认证接口最小形状；字段和错误码以 `api/edge/openapi.yaml` 与实际实现为准，真实微信/企业微信 Provider 仍使用后续适配器替换：
 
 ### 5.1 工号密码首次登录
 
-以下接口是待后端确认的建议合同，员工客户端通过 Edge API 公开入口调用：
+员工客户端通过 Edge API 公开入口调用：
 
 ```http
 POST /api/v1/auth/password/login
@@ -202,7 +202,25 @@ Content-Type: application/json
 
 `principal.public_id` 只允许是服务端确认后的平台身份；失败时不返回可用于猜测 Staff 的外部标识。
 
-### 5.2 当前会话
+### 5.3 绑定和当前会话
+
+```http
+POST /api/v1/auth/bindings/complete
+Content-Type: application/json
+```
+
+```json
+{
+  "binding_ticket": "<one-time-ticket>",
+  "provider": "wecom",
+  "provider_code": "<one-time-code>",
+  "client": "employee-miniapp"
+}
+```
+
+服务端验证 `provider_code` 后将其绑定到 binding_ticket 对应的 Staff，再返回与 5.2 相同的 Edge Session 响应。绑定接口不能接受客户端提供的 `staff_public_id`。
+
+### 5.4 当前会话
 
 ```http
 GET /api/v1/auth/me
@@ -211,7 +229,7 @@ Authorization: Bearer <platform-token>
 
 返回当前平台身份、客户端 audience、会话到期时间和展示用角色标签。它不返回完整权限列表、外部平台标识或 Core 敏感人员档案。
 
-### 5.3 登出/撤销
+### 5.5 登出/撤销
 
 ```http
 POST /api/v1/auth/logout
@@ -219,6 +237,21 @@ Authorization: Bearer <platform-token>
 ```
 
 服务端撤销当前 `sid` 或使其进入不可继续换取状态。Access Token 过期、Staff 被停用、外部绑定被解除时，后续 API 必须返回稳定的 `session_expired`、`staff_inactive` 或 `identity_unbound`。
+
+### 5.6 长期会话与简易登录
+
+推荐默认值：Access Token 有效期约 15 分钟，Refresh/Session 有效期 30 天并在正常使用时滚动续期，绝对最长 90 天；具体数值由后端安全策略确认。小程序使用平台安全存储，Web 优先使用 `HttpOnly + Secure + SameSite` 会话 Cookie 或等价安全方案，不能把长期 Refresh Token 放进 URL 或普通 `localStorage`。
+
+长期会话续期建议使用受保护的刷新接口：
+
+```http
+POST /api/v1/auth/refresh
+Authorization: Bearer <refresh-session-credential>
+```
+
+刷新成功后轮换会话凭据；旧刷新凭据再次使用时视为重放并撤销该会话。刷新接口不改变 Staff 映射，也不重新创建任务数据。
+
+用户体验表现为：首次需要工号密码，完成绑定后日常从个人微信或企业微信一键进入；换设备、退出登录、密码修改、Staff 停用、管理员撤销或风险控制触发时，再要求工号密码或重新绑定。长期登录必须可按设备/会话撤销，不能通过永久 JWT 实现。
 
 ## 6. 建议的 Token 与 Session 规则
 
@@ -232,13 +265,13 @@ Authorization: Bearer <platform-token>
 
 ## 7. 绑定关系建议
 
-建议 Core 增加受控的外部身份绑定用例和持久化模型，但本轮不直接编写 migration：
+BVS2-07 已在 Core 增加受控的外部身份绑定用例和持久化模型，并在 Edge 增加最小会话模型；本节保留跨平台上线时仍必须遵守的规则：
 
 | 规则 | 建议 |
 | --- | --- |
 | 唯一键 | `provider + provider_app + external_subject` 唯一；不使用 `tenant_id` 或 `airport_id` |
 | 目标 | 只能指向一个 active/可审计的 Core `Staff` 或管理用户 |
-| 首次绑定 | 通过预登记邀请码、员工号+二次校验或管理员确认；禁止按姓名模糊匹配 |
+| 首次绑定 | 先通过工号 + 密码认证，再由当前微信入口完成显式绑定；禁止按姓名模糊匹配 |
 | 双入口 | 同一 Staff 可绑定个人微信和企业微信两条外部身份 |
 | 冲突 | 一个外部身份已绑定其他 Staff 时返回 `identity_binding_conflict`，不自动迁移 |
 | 换绑/解绑 | 受权限控制，写 Audit，使旧 Session 失效；不删除历史绑定记录 |
@@ -263,10 +296,11 @@ Authorization: Bearer <platform-token>
 | 决策 | 推荐默认值 | 需要确认 |
 | --- | --- | --- |
 | 小程序项目形态 | 一个业务小程序壳层，内部按 provider 适配个人微信/企业微信 | 平台主体、AppID、企业微信关联和发布主体是否允许这样配置 |
-| 员工 Web 登录 | 企业内部登录/扫码为主；个人微信 Web 作为明确需求再启用 | 员工 Web 是否必须同时覆盖个人微信浏览器登录 |
+| 员工 Web 登录 | 必须支持工号 + 密码；已绑定身份作为快捷入口 | 是否还要在浏览器内直接接入个人微信授权 |
 | 会话签发 | 统一逻辑身份层签发平台 Token，Core/Edge 使用不同 audience | 先落在现有 API 进程，还是已有统一 SSO/Auth 服务承载 |
-| Staff 首次绑定 | 预登记或管理员确认，不自动按姓名/手机号匹配 | 业务部门提供绑定办理流程和责任角色 |
-| 会话撤销 | 服务端按 `sid` 撤销；Staff 停用自动失效 | 是否需要管理员强制下线和设备列表 |
+| Staff 首次绑定 | 工号 + 密码认证后显式绑定；不自动按姓名/手机号匹配 | 业务部门提供绑定办理流程和责任角色 |
+| 长期/简易登录 | 短 Access Token + 30 天可撤销 Session，绝对最长 90 天 | 是否需要管理员强制下线和设备列表 |
+| 会话撤销 | 服务端按 `sid` 撤销；Staff 停用、改密和解绑自动失效 | 是否需要管理员强制下线和设备列表 |
 | Token 算法与轮换 | 生产使用非开发密钥的非对称签名和可轮换公钥 | 既有企业 SSO/OIDC/JWKS 能力及接入方 |
 
 ## 10. 验收条件
@@ -277,7 +311,8 @@ Authorization: Bearer <platform-token>
 2. 未绑定、冲突、Staff 停用、Session 过期、错误 audience 和重复换取均有稳定响应。
 3. `admin-web` 不能用员工 Token 调用 Core 管理接口；员工客户端不能用 Core Token 调用 Edge。
 4. 生产构建不接受 `X-Actor-*` 或 `X-Employee-Public-ID`；开发适配器必须显式开启且不能进入 release。
-5. 后端完成绑定关系、Session、审计、撤销和 `GET /auth/me` 的真实合同，OpenAPI 与实现一致。
-6. 前端 AuthAdapter 只输出统一 `SessionState`，不把外部身份字段传播到共享业务域。
+5. 后端完成工号密码认证、绑定关系、Session、审计、撤销、刷新和 `GET /auth/me` 的真实合同，OpenAPI 与实现一致。
+6. 前端 AuthAdapter 只输出统一 `SessionState`，不把外部身份字段传播到共享业务域；个人微信和企业微信测试登录最终得到同一个 `StaffPublicID`。
+7. 至少验证首次登录、双入口绑定、任一入口读取更新、长期会话续期、退出/撤销、改密和 Staff 停用场景。
 
-身份合同未获得产品/后端确认前，本文件保持 `PROPOSED`，不修改现有 migration，不接入真实第三方账号。
+身份合同的页面和本地 Mock 形态已经可以进入前端实现；真实个人微信/企业微信配置、生产签名密钥、在线双库验证、密码管理页面和管理员全设备撤销仍属于 F0/F1 上线门槛。

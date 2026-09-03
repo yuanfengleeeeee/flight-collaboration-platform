@@ -63,7 +63,7 @@ func TestFlightArrivalRouteAuthorization(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/events/flight-arrived", strings.NewReader(`{"flight_id":101,"team_id":201,"template_id":301,"occurrence_time":"2026-08-07T10:00:00Z"}`))
-			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Type", "application/json; charset=utf-8")
 			if test.role != "" {
 				token, err := coreauth.GenerateToken(cfg.JWT, 7, "test-user", test.role)
 				if err != nil {

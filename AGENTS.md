@@ -20,6 +20,15 @@
 - 系统只服务单机场；禁止 Tenant/Airport、多租户、多机场、`tenant_id`、`airport_id`、airport scope 和机场切换。
 - Architecture Foundation 已 `ACCEPTED / FROZEN`；业务实现从 Phase 2 的 Business Slice v2 开始，旧 B3/B4/B5 现场保持 legacy/paused，不直接恢复。
 
+## 性能、同步和动效约束
+
+- 项目优先保证消息不丢失、重复消息无错误副作用、Core 事实与 Edge Projection 正确收敛，以及同步失败可恢复；任何性能优化不得削弱 Outbox、Inbox、Command、幂等、版本控制和 Retry 语义。
+- 前端动画只能服务于反馈、状态变化或空间关系；禁止高成本或持续运行的 WebGL/Canvas 粒子、视频背景、视差/鼠标跟随、复杂 3D、大面积 blur/backdrop-filter、动态渐变、全量列表 stagger 和大型动效资源，除非有测量、降级方案和明确评审。
+- 前端关键操作不得等待动画；默认只使用短时 `transform`/`opacity` 过渡，支持 `prefers-reduced-motion`，不得使用 `transition: all` 或动画伪造同步成功。
+- 前端应优化代码分包、长列表、请求取消/去重、内存生命周期和小程序增量更新；不得把浏览器缓存或离线队列当作可靠消息存储。
+- 后端性能优化必须先测量 API p95/p99、数据库查询、Worker 延迟、Outbox/Inbox 堆积和 Projection lag；禁止为了吞吐移除可靠同步或让 Redis 取代 MySQL/Outbox/Inbox。
+- 详细性能预算、动画限制和后端待办维护在 `docs/performance-and-reliability-baseline.md`；当前指标为待验证目标，不得写成已通过。
+
 ## 构建、测试与检查命令
 
 - 默认单元/HTTP 测试：`go test ./...`
@@ -70,7 +79,7 @@
 - `git diff --check` 通过，工作区差异经过检查，没有意外文件或敏感信息。
 - 数据库迁移可追踪；破坏性操作未被默认执行。
 - 重要架构或模块变化同步到 `memory-bank/architecture.md`，当前进度同步到 `memory-bank/progress.md`。
-- 用户准备结束长会话时，根目录 `HANDOFF.md` 已按当前实际状态更新。
+- 用户准备结束长会话时，本次任务对应的 `memory-bank/handoffs/<scope>.md` 和根目录 `HANDOFF.md` 索引必须按当前实际状态更新。
 
 ## 上下文不完整时的恢复规则
 
@@ -82,7 +91,10 @@
 
 ## 长会话交接规则
 
-- 当用户表达“我要开新线程了”或等价意思时，必须更新 `AGENTS.md`（仅在确有新的长期规则时）和 `HANDOFF.md`（本次任务状态）。
+- 当用户表达“我要开新线程了”“我要结束当前这个对话了”“我要退出当前对话”或等价的明确结束会话意思时，必须完成本次交接。只有产生新的长期规则时才更新 `AGENTS.md`；当前任务状态写入对应的 `memory-bank/handoffs/<scope>.md`，并把摘要同步到根 `HANDOFF.md`。
+- 任务范围至少分为 `frontend.md`、`backend.md` 和 `infrastructure.md`；跨范围任务分别更新涉及的快照，不把全部细节堆回根 `HANDOFF.md`。范围不明确时写入根索引的待确认项，不覆盖其他任务快照。
+- 任务交接文件采用滚动快照，不无限追加重复内容；历史里程碑和临时结果追加到 `memory-bank/progress.md`，过长后按阶段归档。
+- 更新交接前必须重新读取对应任务文件、根 `HANDOFF.md`、相关 `memory-bank` 文档、`git status` 和 `git diff`。发现其他会话的修改时先合并事实，不得覆盖或回滚。
 - 新线程接手前必须重新检查：哪些文件已修改、实际差异是否符合交接描述、是否存在未提交或意外修改、测试是否真的通过、文档与实现是否一致、是否有其他任务同时修改相关文件。
 - 如果交接写着“功能已完成”但测试失败，必须相信测试结果，修正交接描述，不得继续宣称完成。
 
@@ -91,6 +103,6 @@
 - 当用户表达“我要结束当前这个对话了”或语义相近的结束会话意思时，除完成上述长会话交接外，自动执行一次安全的 GitHub 同步。本条是用户明确授予的提交和推送授权，仅在该触发语义出现时生效。
 - 同步前必须先检查当前分支、远程、`git status`、`git diff` 和未跟踪文件；默认同步当前工作区中已核对、属于本项目且不含敏感信息的修改。
 - 不得提交密码、JWT secret、Token、私钥、生产配置、本地数据库文件、Volume、缓存、临时构建产物或无法确认归属的用户文件。发现风险或归属不明时，保留现场并报告，不能为了同步而强行加入。
-- 需要先更新 `HANDOFF.md`，按实际结果运行适用的检查；任何功能、集成、数据库或 Compose 验证仍必须先执行 `scripts/ensure-docker.ps1`。
+- 需要先更新对应的 `memory-bank/handoffs/<scope>.md` 和根 `HANDOFF.md` 索引，按实际结果运行适用的检查；任何功能、集成、数据库或 Compose 验证仍必须先执行 `scripts/ensure-docker.ps1`。
 - 同步使用当前分支的 `origin` 远程，创建一次说明清楚的 commit 并 push；不得 force push、重置、丢弃本地修改、切换分支或自动创建 Pull Request。
 - Push 成功后必须再次核对远程提交 SHA 和工作区状态；没有实际 commit/push 成功时，不得写成“已同步”。如果远端领先、发生冲突或 push 失败，不得自动覆盖或重置，必须保留现场并报告原因。

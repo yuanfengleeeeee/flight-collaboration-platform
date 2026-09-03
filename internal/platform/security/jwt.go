@@ -16,6 +16,10 @@ type JWTAuthenticator struct {
 	audience string
 }
 
+type SessionTokenIssuer interface {
+	IssueForSession(Principal, string, time.Duration) (string, error)
+}
+
 type accessClaims struct {
 	SessionID string   `json:"sid"`
 	Roles     []string `json:"roles,omitempty"`
@@ -37,14 +41,21 @@ func (a *JWTAuthenticator) Issue(principal Principal, ttl time.Duration) (string
 	if a == nil || len(a.secret) == 0 || principal.PublicID == "" {
 		return "", fmt.Errorf("jwt authenticator or principal is not configured")
 	}
-	if ttl <= 0 {
-		ttl = 15 * time.Minute
-	}
-	now := time.Now().UTC()
 	sessionID, err := id.NewPublicID()
 	if err != nil {
 		return "", err
 	}
+	return a.IssueForSession(principal, sessionID, ttl)
+}
+
+func (a *JWTAuthenticator) IssueForSession(principal Principal, sessionID string, ttl time.Duration) (string, error) {
+	if a == nil || len(a.secret) == 0 || principal.PublicID == "" || strings.TrimSpace(sessionID) == "" {
+		return "", fmt.Errorf("jwt authenticator, principal or session is not configured")
+	}
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	now := time.Now().UTC()
 	claims := accessClaims{SessionID: sessionID, RegisteredClaims: jwt.RegisteredClaims{Subject: principal.PublicID, Issuer: a.issuer, Audience: jwt.ClaimStrings{a.audience}, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(ttl))}}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(a.secret)
@@ -68,5 +79,5 @@ func (a *JWTAuthenticator) AuthenticateToken(tokenValue string) (Principal, erro
 	if err != nil || token == nil || !token.Valid || claims.Subject == "" || claims.SessionID == "" {
 		return Principal{}, fmt.Errorf("invalid access token")
 	}
-	return Principal{Type: HumanPrincipal, PublicID: claims.Subject, Subject: claims.Subject, Roles: append([]string(nil), claims.Roles...), Scopes: AccessScope{Global: claims.Global, AreaIDs: append([]uint64(nil), claims.AreaIDs...), TeamIDs: append([]uint64(nil), claims.TeamIDs...), UserID: claims.UserID}}, nil
+	return Principal{Type: HumanPrincipal, PublicID: claims.Subject, Subject: claims.Subject, SessionID: claims.SessionID, Roles: append([]string(nil), claims.Roles...), Scopes: AccessScope{Global: claims.Global, AreaIDs: append([]uint64(nil), claims.AreaIDs...), TeamIDs: append([]uint64(nil), claims.TeamIDs...), UserID: claims.UserID}}, nil
 }

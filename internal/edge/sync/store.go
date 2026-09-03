@@ -15,6 +15,7 @@ import (
 var (
 	ErrDuplicate                 = errors.New("duplicate edge synchronization record")
 	ErrNotFound                  = errors.New("edge synchronization record not found")
+	ErrLeaseLost                 = errors.New("edge synchronization lease is no longer owned")
 	ErrProjectionVersionConflict = errors.New("edge task projection version conflicts with existing payload")
 	ErrCommandIDConflict         = errors.New("edge command id was reused with different content")
 )
@@ -45,13 +46,45 @@ type InboxRecord struct {
 }
 
 type CommandRecord struct {
-	ID          uint64                      `json:"id"`
-	Envelope    sharedEvent.CommandEnvelope `json:"envelope"`
-	Status      string                      `json:"status"`
-	Attempts    int                         `json:"attempts"`
-	NextAttempt time.Time                   `json:"next_attempt_at"`
-	LastError   string                      `json:"last_error"`
-	CreatedAt   time.Time                   `json:"created_at"`
+	ID             uint64                      `json:"id"`
+	Envelope       sharedEvent.CommandEnvelope `json:"envelope"`
+	Status         string                      `json:"status"`
+	Attempts       int                         `json:"attempts"`
+	NextAttempt    time.Time                   `json:"next_attempt_at"`
+	LastError      string                      `json:"last_error"`
+	CreatedAt      time.Time                   `json:"created_at"`
+	UpdatedAt      time.Time                   `json:"updated_at"`
+	LeaseOwner     string                      `json:"-"`
+	LeaseExpiresAt time.Time                   `json:"-"`
+}
+
+type SyncQueueStats struct {
+	PendingCommandCount     int64
+	PendingInboxCount       int64
+	FailedInboxCount        int64
+	OldestPendingCommandAge time.Duration
+	OldestPendingInboxAge   time.Duration
+	ProjectionLag           time.Duration
+}
+
+type SyncQueueStatsProvider interface {
+	SyncQueueStats(ctx context.Context, now time.Time) (SyncQueueStats, error)
+}
+
+// TaskSnapshot is the employee-scoped recovery read model. ProjectionRevision
+// is a durable per-employee change sequence, not any individual task's
+// sync_version. The current API still returns a complete snapshot; the
+// revision gives a client a stable point to compare after refresh or reconnect.
+type TaskSnapshot struct {
+	Items              []TaskProjection
+	ProjectionRevision uint64
+	SnapshotAt         time.Time
+	ProjectionLag      time.Duration
+	ProjectionLagKnown bool
+}
+
+type TaskSnapshotProvider interface {
+	ListTaskSnapshot(ctx context.Context, employeePublicID string, now time.Time) (TaskSnapshot, error)
 }
 
 type EventProjection func(context.Context, sharedEvent.EventEnvelope) error
@@ -59,6 +92,7 @@ type EventProjection func(context.Context, sharedEvent.EventEnvelope) error
 type Store interface {
 	ApplyEvent(ctx context.Context, envelope sharedEvent.EventEnvelope, project EventProjection) (duplicate bool, err error)
 	PutCommand(ctx context.Context, command sharedEvent.CommandEnvelope) (duplicate bool, err error)
+	FindCommand(ctx context.Context, commandID string) (CommandRecord, error)
 	ClaimPendingCommands(ctx context.Context, limit int, now time.Time) ([]CommandRecord, error)
 	MarkCommandSent(ctx context.Context, commandID string) error
 	MarkCommandRetry(ctx context.Context, commandID string, next time.Time, reason string) error
@@ -67,16 +101,26 @@ type Store interface {
 	ListTaskProjections(ctx context.Context, employeePublicID string) ([]TaskProjection, error)
 }
 
+// LeasedStore is implemented by durable Edge stores so multiple Core Worker
+// processes can claim commands safely and stale acknowledgements are ignored.
+type LeasedStore interface {
+	ClaimPendingCommandsWithLease(ctx context.Context, limit int, now time.Time, owner string, leaseDuration time.Duration) ([]CommandRecord, error)
+	MarkCommandSentWithLease(ctx context.Context, commandID, owner string) error
+	MarkCommandRetryWithLease(ctx context.Context, commandID, owner string, next time.Time, reason string) error
+	MarkCommandFailedWithLease(ctx context.Context, commandID, owner string, reason string) error
+}
+
 type MemoryStore struct {
-	mu          sync.Mutex
-	nextID      uint64
-	inbox       map[string]InboxRecord
-	commands    map[string]CommandRecord
-	projections map[string]TaskProjection
+	mu                  sync.Mutex
+	nextID              uint64
+	inbox               map[string]InboxRecord
+	commands            map[string]CommandRecord
+	projections         map[string]TaskProjection
+	projectionRevisions map[string]uint64
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{inbox: make(map[string]InboxRecord), commands: make(map[string]CommandRecord), projections: make(map[string]TaskProjection)}
+	return &MemoryStore{inbox: make(map[string]InboxRecord), commands: make(map[string]CommandRecord), projections: make(map[string]TaskProjection), projectionRevisions: make(map[string]uint64)}
 }
 
 func (s *MemoryStore) ApplyEvent(ctx context.Context, envelope sharedEvent.EventEnvelope, project EventProjection) (bool, error) {
@@ -135,29 +179,38 @@ func (s *MemoryStore) PutCommand(ctx context.Context, command sharedEvent.Comman
 	}
 	s.nextID++
 	now := time.Now().UTC()
-	s.commands[command.CommandID] = CommandRecord{ID: s.nextID, Envelope: command, Status: sharedEvent.StatusPending, NextAttempt: now, CreatedAt: now}
+	s.commands[command.CommandID] = CommandRecord{ID: s.nextID, Envelope: command, Status: sharedEvent.StatusPending, NextAttempt: now, CreatedAt: now, UpdatedAt: now}
 	return false, nil
 }
 
 func sameCommand(left, right sharedEvent.CommandEnvelope) bool {
-	return left.CommandID == right.CommandID && left.CommandType == right.CommandType && left.SchemaVersion == right.SchemaVersion && left.ActorPublicID == right.ActorPublicID && left.AggregateID == right.AggregateID && sharedEvent.EqualPersistedTime(left.OccurredAt, right.OccurredAt) && left.TraceID == right.TraceID && sharedEvent.EquivalentJSON(left.Payload, right.Payload)
+	return sharedEvent.EquivalentCommand(left, right)
 }
 
 func (s *MemoryStore) ClaimPendingCommands(ctx context.Context, limit int, now time.Time) ([]CommandRecord, error) {
+	return s.ClaimPendingCommandsWithLease(ctx, limit, now, "legacy", time.Nanosecond)
+}
+
+func (s *MemoryStore) ClaimPendingCommandsWithLease(ctx context.Context, limit int, now time.Time, owner string, leaseDuration time.Duration) ([]CommandRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
 		limit = 20
 	}
+	if owner == "" {
+		return nil, fmt.Errorf("command lease owner is required")
+	}
+	if leaseDuration <= 0 {
+		leaseDuration = time.Minute
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	values := make([]CommandRecord, 0, len(s.commands))
 	for _, value := range s.commands {
-		if (value.Status == sharedEvent.StatusPending || value.Status == sharedEvent.StatusRetry || value.Status == sharedEvent.StatusProcessing) && !value.NextAttempt.After(now) {
-			value.Status = sharedEvent.StatusProcessing
-			value.NextAttempt = now.UTC()
-			s.commands[value.Envelope.CommandID] = value
+		ready := (value.Status == sharedEvent.StatusPending || value.Status == sharedEvent.StatusRetry) && !value.NextAttempt.After(now)
+		expired := value.Status == sharedEvent.StatusProcessing && (value.LeaseExpiresAt.IsZero() || !value.LeaseExpiresAt.After(now))
+		if ready || expired {
 			values = append(values, value)
 		}
 	}
@@ -165,11 +218,26 @@ func (s *MemoryStore) ClaimPendingCommands(ctx context.Context, limit int, now t
 	if len(values) > limit {
 		values = values[:limit]
 	}
+	for index, value := range values {
+		value.Status = sharedEvent.StatusProcessing
+		value.NextAttempt = now.UTC()
+		value.UpdatedAt = now.UTC()
+		value.LeaseOwner = owner
+		value.LeaseExpiresAt = now.UTC().Add(leaseDuration)
+		if owner == "legacy" {
+			value.LeaseExpiresAt = now.UTC()
+		}
+		s.commands[value.Envelope.CommandID] = value
+		values[index] = value
+	}
 	return values, nil
 }
 
 func (s *MemoryStore) MarkCommandSent(ctx context.Context, commandID string) error {
-	return s.updateCommand(ctx, commandID, func(value *CommandRecord) { value.Status = sharedEvent.StatusSent; value.LastError = "" })
+	return s.updateCommand(ctx, commandID, func(value *CommandRecord) {
+		value.Status, value.LastError = sharedEvent.StatusSent, ""
+		value.LeaseOwner, value.LeaseExpiresAt = "", time.Time{}
+	})
 }
 
 func (s *MemoryStore) MarkCommandRetry(ctx context.Context, commandID string, next time.Time, reason string) error {
@@ -178,6 +246,7 @@ func (s *MemoryStore) MarkCommandRetry(ctx context.Context, commandID string, ne
 		value.NextAttempt = next.UTC()
 		value.Attempts++
 		value.LastError = reason
+		value.LeaseOwner, value.LeaseExpiresAt = "", time.Time{}
 	})
 }
 
@@ -186,6 +255,25 @@ func (s *MemoryStore) MarkCommandFailed(ctx context.Context, commandID string, r
 		value.Status = sharedEvent.StatusFailed
 		value.Attempts++
 		value.LastError = reason
+		value.LeaseOwner, value.LeaseExpiresAt = "", time.Time{}
+	})
+}
+
+func (s *MemoryStore) MarkCommandSentWithLease(ctx context.Context, commandID, owner string) error {
+	return s.updateCommandWithLease(ctx, commandID, owner, func(value *CommandRecord) {
+		value.Status, value.LastError = sharedEvent.StatusSent, ""
+	})
+}
+
+func (s *MemoryStore) MarkCommandRetryWithLease(ctx context.Context, commandID, owner string, next time.Time, reason string) error {
+	return s.updateCommandWithLease(ctx, commandID, owner, func(value *CommandRecord) {
+		value.Status, value.NextAttempt, value.Attempts, value.LastError = sharedEvent.StatusRetry, next.UTC(), value.Attempts+1, reason
+	})
+}
+
+func (s *MemoryStore) MarkCommandFailedWithLease(ctx context.Context, commandID, owner string, reason string) error {
+	return s.updateCommandWithLease(ctx, commandID, owner, func(value *CommandRecord) {
+		value.Status, value.Attempts, value.LastError = sharedEvent.StatusFailed, value.Attempts+1, reason
 	})
 }
 
@@ -202,10 +290,11 @@ func (s *MemoryStore) UpsertTaskProjection(ctx context.Context, projection TaskP
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if previous, exists := s.projections[projection.PublicID]; exists && previous.SyncVersion > projection.SyncVersion {
+	previous, exists := s.projections[projection.PublicID]
+	if exists && previous.SyncVersion > projection.SyncVersion {
 		return nil
 	}
-	if previous, exists := s.projections[projection.PublicID]; exists && previous.SyncVersion == projection.SyncVersion {
+	if exists && previous.SyncVersion == projection.SyncVersion {
 		if !sameTaskProjection(previous, projection) {
 			return ErrProjectionVersionConflict
 		}
@@ -215,6 +304,12 @@ func (s *MemoryStore) UpsertTaskProjection(ctx context.Context, projection TaskP
 		projection.UpdatedAt = time.Now().UTC()
 	}
 	s.projections[projection.PublicID] = projection
+	s.projectionRevisions[projection.EmployeePublicID]++
+	if exists && previous.EmployeePublicID != projection.EmployeePublicID {
+		// Reassignment removes the task from the previous employee's snapshot as
+		// well, so both employee-scoped revisions must advance.
+		s.projectionRevisions[previous.EmployeePublicID]++
+	}
 	return nil
 }
 
@@ -246,8 +341,19 @@ func sameTaskProjection(left, right TaskProjection) bool {
 }
 
 func (s *MemoryStore) ListTaskProjections(ctx context.Context, employeePublicID string) ([]TaskProjection, error) {
-	if err := ctx.Err(); err != nil {
+	snapshot, err := s.ListTaskSnapshot(ctx, employeePublicID, time.Now().UTC())
+	if err != nil {
 		return nil, err
+	}
+	return snapshot.Items, nil
+}
+
+func (s *MemoryStore) ListTaskSnapshot(ctx context.Context, employeePublicID string, now time.Time) (TaskSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return TaskSnapshot{}, err
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -257,8 +363,77 @@ func (s *MemoryStore) ListTaskProjections(ctx context.Context, employeePublicID 
 			values = append(values, value)
 		}
 	}
-	sort.Slice(values, func(i, j int) bool { return values[i].UpdatedAt.Before(values[j].UpdatedAt) })
-	return values, nil
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].UpdatedAt.Equal(values[j].UpdatedAt) {
+			return values[i].PublicID < values[j].PublicID
+		}
+		return values[i].UpdatedAt.Before(values[j].UpdatedAt)
+	})
+	latestApplied := s.latestAppliedEventAtLocked()
+	snapshot := TaskSnapshot{Items: values, ProjectionRevision: s.projectionRevisions[employeePublicID], SnapshotAt: now.UTC()}
+	if !latestApplied.IsZero() {
+		snapshot.ProjectionLagKnown = true
+		if now.After(latestApplied) {
+			snapshot.ProjectionLag = now.Sub(latestApplied)
+		}
+	}
+	return snapshot, nil
+}
+
+func (s *MemoryStore) SyncQueueStats(ctx context.Context, now time.Time) (SyncQueueStats, error) {
+	if err := ctx.Err(); err != nil {
+		return SyncQueueStats{}, err
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := SyncQueueStats{}
+	var oldestCommand time.Time
+	for _, value := range s.commands {
+		switch value.Status {
+		case sharedEvent.StatusPending, sharedEvent.StatusRetry, sharedEvent.StatusProcessing:
+			stats.PendingCommandCount++
+			if oldestCommand.IsZero() || value.CreatedAt.Before(oldestCommand) {
+				oldestCommand = value.CreatedAt
+			}
+		}
+	}
+	if !oldestCommand.IsZero() && now.After(oldestCommand) {
+		stats.OldestPendingCommandAge = now.Sub(oldestCommand)
+	}
+	var oldestInbox time.Time
+	for _, value := range s.inbox {
+		switch value.Status {
+		case sharedEvent.StatusPending, sharedEvent.StatusProcessing, sharedEvent.StatusRetry:
+			stats.PendingInboxCount++
+			receivedAt := value.ReceivedAt
+			if !receivedAt.IsZero() && (oldestInbox.IsZero() || receivedAt.Before(oldestInbox)) {
+				oldestInbox = receivedAt
+			}
+		case sharedEvent.StatusFailed:
+			stats.FailedInboxCount++
+		}
+	}
+	if !oldestInbox.IsZero() && now.After(oldestInbox) {
+		stats.OldestPendingInboxAge = now.Sub(oldestInbox)
+	}
+	latestApplied := s.latestAppliedEventAtLocked()
+	if !latestApplied.IsZero() && now.After(latestApplied) {
+		stats.ProjectionLag = now.Sub(latestApplied)
+	}
+	return stats, nil
+}
+
+func (s *MemoryStore) latestAppliedEventAtLocked() time.Time {
+	var latestApplied time.Time
+	for _, value := range s.inbox {
+		if value.Status == sharedEvent.StatusApplied && value.Envelope.OccurredAt.After(latestApplied) {
+			latestApplied = value.Envelope.OccurredAt
+		}
+	}
+	return latestApplied
 }
 
 func (s *MemoryStore) InboxRecord(eventID string) (InboxRecord, bool) {
@@ -275,6 +450,19 @@ func (s *MemoryStore) CommandRecord(commandID string) (CommandRecord, bool) {
 	return value, ok
 }
 
+func (s *MemoryStore) FindCommand(ctx context.Context, commandID string) (CommandRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return CommandRecord{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.commands[commandID]
+	if !ok {
+		return CommandRecord{}, ErrNotFound
+	}
+	return value, nil
+}
+
 func (s *MemoryStore) updateCommand(ctx context.Context, commandID string, update func(*CommandRecord)) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -286,6 +474,30 @@ func (s *MemoryStore) updateCommand(ctx context.Context, commandID string, updat
 		return ErrNotFound
 	}
 	update(&value)
+	value.UpdatedAt = time.Now().UTC()
+	s.commands[commandID] = value
+	return nil
+}
+
+func (s *MemoryStore) updateCommandWithLease(ctx context.Context, commandID, owner string, update func(*CommandRecord)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if owner == "" {
+		return fmt.Errorf("command lease owner is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.commands[commandID]
+	if !ok {
+		return ErrNotFound
+	}
+	if value.Status != sharedEvent.StatusProcessing || value.LeaseOwner != owner {
+		return ErrLeaseLost
+	}
+	update(&value)
+	value.LeaseOwner, value.LeaseExpiresAt = "", time.Time{}
+	value.UpdatedAt = time.Now().UTC()
 	s.commands[commandID] = value
 	return nil
 }

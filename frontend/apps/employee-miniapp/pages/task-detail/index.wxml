@@ -1,0 +1,14 @@
+<view class="page-shell detail-page">
+  <view wx:if="{{task}}">
+    <view class="eyebrow">TASK / {{task.flight_display_no}}</view>
+    <view class="title">{{task.task_name}}</view>
+    <view class="tag">{{task.business_status || task.status}}</view>
+    <view class="card"><view class="muted">{{task.area_name}} · {{task.planned_at}}</view><view class="detail-message">{{task.message}}</view></view>
+    <view wx:if="{{notice}}" class="card muted">{{notice}}</view>
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <button wx:if="{{canAccept}}" class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="accept">接收任务</button>
+    <button wx:if="{{canComplete}}" class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="complete">完成任务</button>
+    <button wx:if="{{!canAccept && !canComplete}}" class="button secondary" bindtap="reload">刷新状态</button>
+  </view>
+  <view wx:else class="card muted">正在读取任务详情…</view>
+</view>

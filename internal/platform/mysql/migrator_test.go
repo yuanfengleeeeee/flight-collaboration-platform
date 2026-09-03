@@ -6,13 +6,17 @@ import (
 )
 
 func TestDiscoverCoreAndEdgeMigrations(t *testing.T) {
+	wantByTarget := map[string][]uint64{
+		"core": {1, 2, 3, 4, 5},
+		"edge": {1, 2, 3, 4, 5, 6},
+	}
 	for _, target := range []string{"core", "edge"} {
 		t.Run(target, func(t *testing.T) {
 			migrations, err := Discover(filepath.Join("..", "..", "..", "migrations", target, "mysql"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantVersions := []uint64{1, 2}
+			wantVersions := wantByTarget[target]
 			if len(migrations) != len(wantVersions) {
 				t.Fatalf("unexpected migrations: %#v", migrations)
 			}

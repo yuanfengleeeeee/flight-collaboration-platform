@@ -24,6 +24,14 @@ type EdgeTransport interface {
 	AcknowledgeCommand(ctx context.Context, commandID string, status string, reason string, nextAttempt time.Time) error
 }
 
+// LeasedEdgeTransport carries the Worker identity across the network so an
+// Edge replica can enforce durable claim ownership during acknowledgement.
+// EdgeTransport remains the compatibility fallback for small test doubles.
+type LeasedEdgeTransport interface {
+	PullCommandsWithLease(ctx context.Context, limit int, owner string, leaseDuration time.Duration) ([]edgesync.CommandRecord, error)
+	AcknowledgeCommandWithLease(ctx context.Context, commandID string, owner string, status string, reason string, nextAttempt time.Time) error
+}
+
 type CoreCommandHandler interface {
 	HandleCommand(ctx context.Context, command sharedEvent.CommandEnvelope) error
 }

@@ -20,7 +20,7 @@ func TestJWTContainsIdentityClaimsButNotRolePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if principal.PublicID != "employee-public-id" || len(principal.Roles) != 0 {
+	if principal.PublicID != "employee-public-id" || principal.SessionID == "" || len(principal.Roles) != 0 {
 		t.Fatalf("unexpected principal: %#v", principal)
 	}
 }

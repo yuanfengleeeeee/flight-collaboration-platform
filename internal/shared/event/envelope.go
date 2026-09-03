@@ -76,13 +76,23 @@ func NewEvent(eventType, aggregateType, aggregateID, producer string, payload an
 }
 
 func NewCommand(commandType, actorPublicID, aggregateID, traceID string, payload any) (CommandEnvelope, error) {
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return CommandEnvelope{}, fmt.Errorf("marshal command payload: %w", err)
-	}
 	commandID, err := id.NewPublicID()
 	if err != nil {
 		return CommandEnvelope{}, err
+	}
+	return NewCommandWithID(commandID, commandType, actorPublicID, aggregateID, traceID, time.Time{}, payload)
+}
+
+// NewCommandWithID lets a client supply the logical idempotency key. The
+// transport metadata remains server-generated when the client does not send
+// it, so a retry does not need to reconstruct the original envelope exactly.
+func NewCommandWithID(commandID, commandType, actorPublicID, aggregateID, traceID string, occurredAt time.Time, payload any) (CommandEnvelope, error) {
+	if strings.TrimSpace(commandID) == "" {
+		return CommandEnvelope{}, errors.New("command_id is required")
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return CommandEnvelope{}, fmt.Errorf("marshal command payload: %w", err)
 	}
 	if strings.TrimSpace(traceID) == "" {
 		traceID, err = id.NewPublicID()
@@ -90,11 +100,26 @@ func NewCommand(commandType, actorPublicID, aggregateID, traceID string, payload
 			return CommandEnvelope{}, err
 		}
 	}
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
+	}
 	return CommandEnvelope{
 		CommandID: commandID, CommandType: commandType, SchemaVersion: 1,
 		ActorPublicID: actorPublicID, AggregateID: aggregateID,
-		OccurredAt: time.Now().UTC(), TraceID: traceID, Payload: encoded,
+		OccurredAt: occurredAt.UTC(), TraceID: traceID, Payload: encoded,
 	}, nil
+}
+
+// EquivalentCommand compares the durable business identity of a command.
+// Trace IDs and occurrence timestamps describe one delivery attempt; they are
+// intentionally ignored so client retries remain the same logical command.
+func EquivalentCommand(left, right CommandEnvelope) bool {
+	return left.CommandID == right.CommandID &&
+		left.CommandType == right.CommandType &&
+		left.SchemaVersion == right.SchemaVersion &&
+		left.ActorPublicID == right.ActorPublicID &&
+		left.AggregateID == right.AggregateID &&
+		EquivalentJSON(left.Payload, right.Payload)
 }
 
 // EquivalentJSON treats object key ordering and insignificant whitespace as

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,10 @@ const (
 )
 
 func Middleware(log *zap.Logger, component string) gin.HandlerFunc {
+	return MiddlewareWithMetrics(log, component, nil)
+}
+
+func MiddlewareWithMetrics(log *zap.Logger, component string, metrics *Registry) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := headerOrGenerated(c.GetHeader("X-Request-ID"))
 		traceID := headerOrGenerated(c.GetHeader("X-Trace-ID"))
@@ -27,6 +32,15 @@ func Middleware(log *zap.Logger, component string) gin.HandlerFunc {
 		c.Header("X-Trace-ID", traceID)
 		started := time.Now()
 		c.Next()
+		if metrics != nil {
+			route := c.FullPath()
+			if route == "" {
+				route = "unmatched"
+			}
+			labels := Labels{"component": component, "method": c.Request.Method, "route": route, "status": strconv.Itoa(c.Writer.Status())}
+			metrics.Inc("flight_http_requests_total", labels)
+			metrics.Observe("flight_http_request_duration_seconds", labels, time.Since(started).Seconds())
+		}
 		log.Info("http request",
 			zap.String("component", component), zap.String("request_id", requestID), zap.String("trace_id", traceID),
 			zap.String("method", c.Request.Method), zap.String("path", c.Request.URL.Path),

@@ -12,7 +12,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/adminauth"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/adminquery"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flighttask"
+	coreidentity "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/identity"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/config"
 	platformhealth "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/health"
 	platformhttpauth "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/httpauth"
@@ -56,6 +59,18 @@ func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuth(cfg config.Ser
 }
 
 func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQuery(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService) *Server {
+	return NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentity(cfg, db, redisClient, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, nil, "")
+}
+
+func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentity(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService, identityService *coreidentity.Service, identitySharedKey string) *Server {
+	return NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuth(cfg, db, redisClient, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, identitySharedKey, nil, nil)
+}
+
+// NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuth
+// keeps the management SSO resolver at the Core boundary. Business handlers
+// receive only the already-resolved Core principal; they never call an external
+// identity provider or inspect SSO state directly.
+func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuth(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService, identityService *coreidentity.Service, identitySharedKey string, adminAuthService *adminauth.Service, adminQueryService *adminquery.Service) *Server {
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -65,9 +80,18 @@ func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQuery(cf
 		map[string]platformhealth.Checker{"redis": func(ctx context.Context) error { return platformredis.Ping(ctx, redisClient) }},
 	)
 	r := gin.New()
-	r.Use(gin.Recovery(), platformobservability.Middleware(log, "core-api"))
+	metrics := platformobservability.NewHTTPRegistry()
+	r.Use(gin.Recovery(), platformobservability.MiddlewareWithMetrics(log, "core-api", metrics))
 	r.GET("/health/live", endpoint.Live())
 	r.GET("/health/ready", endpoint.Ready())
+	r.GET("/metrics", func(c *gin.Context) {
+		if sqlDB, err := platformmysql.SQLDB(db); err == nil {
+			platformobservability.RecordDBStats(metrics, "core", sqlDB)
+		}
+		metrics.Handler().ServeHTTP(c.Writer, c.Request)
+	})
+	coreidentity.RegisterInternalRoutes(r, identityService, identitySharedKey)
+	adminauth.RegisterRoutes(r, adminAuthService, authenticator, cfg.AllowDevActorHeaders)
 	r.GET("/api/v1/foundation", func(c *gin.Context) {
 		businessMode := "foundation-only"
 		if arrivalService != nil {
@@ -84,7 +108,11 @@ func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQuery(cf
 	flighttask.RegisterRoutes(r, arrivalService)
 	var authMiddleware gin.HandlerFunc
 	if authenticator != nil || cfg.AllowDevActorHeaders {
-		authMiddleware = platformhttpauth.RequireJWT(authenticator, nil, cfg.AllowDevActorHeaders)
+		var resolver platformhttpauth.PrincipalResolver
+		if adminAuthService != nil {
+			resolver = adminAuthService
+		}
+		authMiddleware = platformhttpauth.RequireJWT(authenticator, resolver, cfg.AllowDevActorHeaders)
 	}
 	if authMiddleware == nil {
 		flighttask.RegisterConfirmationRoutes(r, confirmationService)
@@ -98,6 +126,13 @@ func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQuery(cf
 			flighttask.RegisterTaskQueryRoutes(r, taskQueryService)
 		} else {
 			flighttask.RegisterTaskQueryRoutes(r, taskQueryService, authMiddleware)
+		}
+	}
+	if adminQueryService != nil {
+		if authMiddleware == nil {
+			adminquery.RegisterRoutes(r, adminQueryService)
+		} else {
+			adminquery.RegisterRoutes(r, adminQueryService, authMiddleware)
 		}
 	}
 	return &Server{

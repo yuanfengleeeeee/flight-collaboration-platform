@@ -6,7 +6,7 @@
 > BVS2-03：COMPLETED（Flight → Task → Candidate）
 > 下一步：BVS2-04 Leader Confirm
 
-本文是 Architecture Foundation 之后第一个真实业务切片的唯一业务基线。旧 memory-bank/business-slice-001.md、旧 B3 代码和旧业务路由继续保持 legacy/paused，不作为本切片实现入口。
+本文是 Architecture Foundation 之后第一个真实业务切片的唯一业务基线。旧 B3 业务切片材料、旧 B3 代码和旧业务路由继续保持 legacy/paused，不作为本切片实现入口。
 
 本文件在 BVS2-01 阶段冻结业务规则、状态机、权限、Core/Edge 契约、异常补偿和可执行验收场景；BVS2-03 已按本冻结基线落地 Core Flight → Task → Candidate 实现，后续切片继续受本文件约束。
 

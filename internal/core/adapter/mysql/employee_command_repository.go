@@ -218,7 +218,7 @@ func newCoreInboxCommandRow(command sharedEvent.CommandEnvelope) coreInboxComman
 }
 
 func sameCommandEnvelope(row coreInboxCommandRow, command sharedEvent.CommandEnvelope) bool {
-	return row.CommandID == command.CommandID && row.CommandType == command.CommandType && row.SchemaVersion == command.SchemaVersion && row.ActorPublicID == command.ActorPublicID && row.AggregateID == command.AggregateID && sharedEvent.EqualPersistedTime(row.OccurredAt, command.OccurredAt) && row.TraceID == command.TraceID && sharedEvent.EquivalentJSON(row.Payload, command.Payload)
+	return sharedEvent.EquivalentCommand(sharedEvent.CommandEnvelope{CommandID: row.CommandID, CommandType: row.CommandType, SchemaVersion: row.SchemaVersion, ActorPublicID: row.ActorPublicID, AggregateID: row.AggregateID, Payload: row.Payload}, command)
 }
 
 type architectureProbeEventRow struct {
