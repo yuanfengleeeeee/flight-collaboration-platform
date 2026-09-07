@@ -247,11 +247,14 @@ func encodeUint64List(values []uint64) ([]byte, error) {
 
 func decodeUint64List(value []byte) ([]uint64, error) {
 	if len(strings.TrimSpace(string(value))) == 0 || string(value) == "null" {
-		return nil, nil
+		return []uint64{}, nil
 	}
 	var result []uint64
 	if err := json.Unmarshal(value, &result); err != nil {
 		return nil, err
+	}
+	if result == nil {
+		return []uint64{}, nil
 	}
 	return result, nil
 }

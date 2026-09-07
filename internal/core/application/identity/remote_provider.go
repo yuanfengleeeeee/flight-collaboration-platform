@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	defaultWeChatCode2SessionURL = "https://api.weixin.qq.com/sns/jscode2session"
-	defaultWeComTokenURL         = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
-	defaultWeComUserInfoURL      = "https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo"
+	defaultWeChatCode2SessionURL       = "https://api.weixin.qq.com/sns/jscode2session"
+	defaultWeComTokenURL               = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+	defaultWeComUserInfoURL            = "https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo"
+	defaultWeComMiniappCode2SessionURL = "https://qyapi.weixin.qq.com/cgi-bin/miniprogram/jscode2session"
 )
 
 var ErrProviderUnavailable = errors.New("identity provider is unavailable")
@@ -32,6 +33,7 @@ type RemoteProviderConfig struct {
 	WeComSecret                   string
 	WeComTokenURL                 string
 	WeComUserInfoURL              string
+	WeComMiniappCode2SessionURL   string
 	HTTPClient                    *http.Client
 }
 
@@ -62,6 +64,9 @@ func NewRemoteProviderVerifier(config RemoteProviderConfig) (*RemoteProviderVeri
 	}
 	if config.WeComUserInfoURL == "" {
 		config.WeComUserInfoURL = defaultWeComUserInfoURL
+	}
+	if config.WeComMiniappCode2SessionURL == "" {
+		config.WeComMiniappCode2SessionURL = defaultWeComMiniappCode2SessionURL
 	}
 	if config.PersonalWeChatAppID == "" || config.PersonalWeChatSecret == "" || config.WeComCorpID == "" || config.WeComAgentID == "" || config.WeComSecret == "" {
 		return nil, fmt.Errorf("real identity provider requires personal WeChat and WeCom credentials")
@@ -103,6 +108,13 @@ func (v *RemoteProviderVerifier) Verify(ctx context.Context, provider, code, _ s
 	}
 }
 
+func (v *RemoteProviderVerifier) VerifyForClient(ctx context.Context, provider, code, client, redirectURI string) (ExternalIdentity, error) {
+	if provider == ProviderWeCom && client == ClientEmployeeWeComMiniapp {
+		return v.verifyWeComMiniapp(ctx, code)
+	}
+	return v.Verify(ctx, provider, code, redirectURI)
+}
+
 type weChatCode2SessionResponse struct {
 	OpenID     string `json:"openid"`
 	UnionID    string `json:"unionid"`
@@ -141,6 +153,15 @@ type weComUserInfoResponse struct {
 	ErrMsg  string `json:"errmsg"`
 }
 
+type weComMiniappCode2SessionResponse struct {
+	UserID       string `json:"userid"`
+	LegacyUserID string `json:"UserId"`
+	CorpID       string `json:"corpid"`
+	SessionKey   string `json:"session_key"`
+	ErrCode      int    `json:"errcode"`
+	ErrMsg       string `json:"errmsg"`
+}
+
 func (v *RemoteProviderVerifier) verifyWeCom(ctx context.Context, code string) (ExternalIdentity, error) {
 	accessToken, err := v.weComAccessToken(ctx)
 	if err != nil {
@@ -159,6 +180,29 @@ func (v *RemoteProviderVerifier) verifyWeCom(ctx context.Context, code string) (
 		return ExternalIdentity{}, ErrProviderCodeInvalid
 	}
 	return ExternalIdentity{Provider: ProviderWeCom, ProviderApp: v.ProviderApp(ProviderWeCom), ExternalSubject: strings.TrimSpace(response.UserID)}, nil
+}
+
+func (v *RemoteProviderVerifier) verifyWeComMiniapp(ctx context.Context, code string) (ExternalIdentity, error) {
+	accessToken, err := v.weComAccessToken(ctx)
+	if err != nil {
+		return ExternalIdentity{}, err
+	}
+	query := url.Values{}
+	query.Set("access_token", accessToken)
+	query.Set("js_code", strings.TrimSpace(code))
+	query.Set("grant_type", "authorization_code")
+	var response weComMiniappCode2SessionResponse
+	if err := v.getJSON(ctx, v.config.WeComMiniappCode2SessionURL, query, &response); err != nil {
+		return ExternalIdentity{}, err
+	}
+	userID := strings.TrimSpace(response.UserID)
+	if userID == "" {
+		userID = strings.TrimSpace(response.LegacyUserID)
+	}
+	if response.ErrCode != 0 || userID == "" || strings.TrimSpace(response.SessionKey) == "" || (strings.TrimSpace(response.CorpID) != "" && strings.TrimSpace(response.CorpID) != v.config.WeComCorpID) {
+		return ExternalIdentity{}, ErrProviderCodeInvalid
+	}
+	return ExternalIdentity{Provider: ProviderWeCom, ProviderApp: v.ProviderApp(ProviderWeCom), ExternalSubject: userID}, nil
 }
 
 func (v *RemoteProviderVerifier) weComAccessToken(ctx context.Context) (string, error) {

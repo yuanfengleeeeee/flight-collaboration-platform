@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	exceptionmodule "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/module/exception"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/security"
 )
 
@@ -23,6 +24,8 @@ var (
 	ErrRepositoryNotConfigured = errors.New("admin query repository is not configured")
 	ErrForbidden               = errors.New("principal is not allowed to read this management resource")
 	ErrInvalidInput            = errors.New("invalid management query input")
+	ErrNotFound                = errors.New("management resource not found")
+	ErrConflict                = errors.New("management resource state conflict")
 )
 
 type PersonnelFilter struct {
@@ -41,6 +44,34 @@ type AssignmentFilter struct {
 	Page              int
 	PageSize          int
 	Scope             security.AccessScope
+}
+
+type ExceptionFilter struct {
+	Status            string
+	Severity          string
+	TaskPublicID      string
+	PersonnelPublicID string
+	Page              int
+	PageSize          int
+	Scope             security.AccessScope
+}
+
+type ReportFilter struct {
+	From  string
+	To    string
+	Scope security.AccessScope
+}
+
+type ExceptionUpdate struct {
+	PublicID       string
+	Status         string
+	ResolutionNote string
+	ActorPublicID  string
+	RequestID      string
+	TraceID        string
+	SourceIP       string
+	Now            time.Time
+	Scope          security.AccessScope
 }
 
 type Personnel struct {
@@ -73,14 +104,37 @@ type Assignment struct {
 	TeamPublicID        string  `json:"team_public_id"`
 	Status              string  `json:"status"`
 	StatusVersion       uint64  `json:"status_version"`
+	ReceiptStatus       string  `json:"receipt_status"`
 	ConfirmationID      string  `json:"confirmation_id"`
 	ConfirmedByPublicID string  `json:"confirmed_by_public_id"`
 	ConfirmedAt         string  `json:"confirmed_at"`
+	ReceivedAt          *string `json:"received_at,omitempty"`
 	AcceptedAt          *string `json:"accepted_at,omitempty"`
 	CompletedAt         *string `json:"completed_at,omitempty"`
 	CancelledAt         *string `json:"cancelled_at,omitempty"`
 	CancelReason        string  `json:"cancel_reason,omitempty"`
 	PlannedAt           string  `json:"planned_at"`
+}
+
+type Exception struct {
+	PublicID           string  `json:"public_id"`
+	TaskPublicID       string  `json:"task_public_id"`
+	FlightPublicID     string  `json:"flight_public_id"`
+	FlightDisplayNo    string  `json:"flight_display_no"`
+	AssignmentPublicID string  `json:"assignment_public_id"`
+	PersonnelPublicID  string  `json:"personnel_public_id"`
+	PersonnelName      string  `json:"personnel_name"`
+	AreaPublicID       string  `json:"area_public_id"`
+	TeamPublicID       string  `json:"team_public_id"`
+	Category           string  `json:"category"`
+	Severity           string  `json:"severity"`
+	Description        string  `json:"description"`
+	Status             string  `json:"status"`
+	ReportedByPublicID string  `json:"reported_by_public_id"`
+	ReportedAt         string  `json:"reported_at"`
+	ResolvedByPublicID string  `json:"resolved_by_public_id,omitempty"`
+	ResolvedAt         *string `json:"resolved_at,omitempty"`
+	ResolutionNote     string  `json:"resolution_note,omitempty"`
 }
 
 type PersonnelListResult struct {
@@ -97,9 +151,29 @@ type AssignmentListResult struct {
 	Total    int64        `json:"total"`
 }
 
+type ExceptionListResult struct {
+	Items    []Exception `json:"items"`
+	Page     int         `json:"page"`
+	PageSize int         `json:"page_size"`
+	Total    int64       `json:"total"`
+}
+
+type ReportOverview struct {
+	From             string           `json:"from,omitempty"`
+	To               string           `json:"to,omitempty"`
+	TaskCounts       map[string]int64 `json:"task_counts"`
+	FlightCounts     map[string]int64 `json:"flight_counts"`
+	AssignmentCounts map[string]int64 `json:"assignment_counts"`
+	PersonnelCounts  map[string]int64 `json:"personnel_counts"`
+	ExceptionCounts  map[string]int64 `json:"exception_counts"`
+}
+
 type Repository interface {
 	ListPersonnel(context.Context, PersonnelFilter) ([]Personnel, int64, error)
 	ListAssignments(context.Context, AssignmentFilter) ([]Assignment, int64, error)
+	ListExceptions(context.Context, ExceptionFilter) ([]Exception, int64, error)
+	GetReportOverview(context.Context, ReportFilter) (ReportOverview, error)
+	UpdateException(context.Context, ExceptionUpdate) error
 }
 
 type Service struct {
@@ -149,6 +223,71 @@ func (s *Service) ListAssignments(ctx context.Context, principal security.Princi
 	return AssignmentListResult{Items: items, Page: normalized.Page, PageSize: normalized.PageSize, Total: total}, nil
 }
 
+func (s *Service) ListExceptions(ctx context.Context, principal security.Principal, filter ExceptionFilter) (ExceptionListResult, error) {
+	if s == nil || s.repository == nil {
+		return ExceptionListResult{}, ErrRepositoryNotConfigured
+	}
+	if err := s.authorize(principal, "exception:read"); err != nil {
+		return ExceptionListResult{}, err
+	}
+	filter.Scope = principal.Scopes
+	normalized, err := normalizeExceptionFilter(filter)
+	if err != nil {
+		return ExceptionListResult{}, err
+	}
+	items, total, err := s.repository.ListExceptions(ctx, normalized)
+	if err != nil {
+		return ExceptionListResult{}, fmt.Errorf("list exceptions: %w", err)
+	}
+	return ExceptionListResult{Items: items, Page: normalized.Page, PageSize: normalized.PageSize, Total: total}, nil
+}
+
+func (s *Service) GetReportOverview(ctx context.Context, principal security.Principal, filter ReportFilter) (ReportOverview, error) {
+	if s == nil || s.repository == nil {
+		return ReportOverview{}, ErrRepositoryNotConfigured
+	}
+	if err := s.authorize(principal, "analytics:read"); err != nil {
+		return ReportOverview{}, err
+	}
+	filter.Scope = principal.Scopes
+	normalized, err := normalizeReportFilter(filter)
+	if err != nil {
+		return ReportOverview{}, err
+	}
+	result, err := s.repository.GetReportOverview(ctx, normalized)
+	if err != nil {
+		return ReportOverview{}, fmt.Errorf("get report overview: %w", err)
+	}
+	return result, nil
+}
+
+func (s *Service) UpdateException(ctx context.Context, principal security.Principal, publicID, status, resolutionNote string, meta ExceptionUpdate) error {
+	if s == nil || s.repository == nil {
+		return ErrRepositoryNotConfigured
+	}
+	if err := s.authorize(principal, "exception:manage"); err != nil {
+		return err
+	}
+	publicID = strings.TrimSpace(publicID)
+	status = strings.TrimSpace(status)
+	resolutionNote = strings.TrimSpace(resolutionNote)
+	if publicID == "" || len(publicID) > 128 || (status != string(exceptionmodule.StatusAcknowledged) && status != string(exceptionmodule.StatusResolved) && status != string(exceptionmodule.StatusRejected)) || len(resolutionNote) > 1024 {
+		return ErrInvalidInput
+	}
+	meta.PublicID = publicID
+	meta.Status = status
+	meta.ResolutionNote = resolutionNote
+	meta.ActorPublicID = principal.PublicID
+	meta.Scope = principal.Scopes
+	if meta.Now.IsZero() {
+		meta.Now = time.Now().UTC()
+	}
+	if err := s.repository.UpdateException(ctx, meta); err != nil {
+		return fmt.Errorf("update exception: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) authorize(principal security.Principal, permission security.Permission) error {
 	if principal.Type != security.HumanPrincipal || strings.TrimSpace(principal.PublicID) == "" || s.authorizer == nil {
 		return ErrForbidden
@@ -193,6 +332,63 @@ func normalizeAssignmentFilter(filter AssignmentFilter) (AssignmentFilter, error
 	}
 	if filter.Page < 1 || filter.PageSize < 1 || filter.PageSize > maxPageSize {
 		return AssignmentFilter{}, ErrInvalidInput
+	}
+	return filter, nil
+}
+
+func normalizeExceptionFilter(filter ExceptionFilter) (ExceptionFilter, error) {
+	filter.Status = strings.TrimSpace(filter.Status)
+	filter.Severity = strings.TrimSpace(filter.Severity)
+	filter.TaskPublicID = strings.TrimSpace(filter.TaskPublicID)
+	filter.PersonnelPublicID = strings.TrimSpace(filter.PersonnelPublicID)
+	if filter.Status != "" {
+		switch exceptionmodule.Status(filter.Status) {
+		case exceptionmodule.StatusOpen, exceptionmodule.StatusAcknowledged, exceptionmodule.StatusResolved, exceptionmodule.StatusRejected:
+		default:
+			return ExceptionFilter{}, ErrInvalidInput
+		}
+	}
+	if filter.Severity != "" {
+		switch exceptionmodule.Severity(filter.Severity) {
+		case exceptionmodule.SeverityLow, exceptionmodule.SeverityMedium, exceptionmodule.SeverityHigh, exceptionmodule.SeverityCritical:
+		default:
+			return ExceptionFilter{}, ErrInvalidInput
+		}
+	}
+	if len(filter.TaskPublicID) > 128 || len(filter.PersonnelPublicID) > 128 {
+		return ExceptionFilter{}, ErrInvalidInput
+	}
+	if filter.Page == 0 {
+		filter.Page = defaultPage
+	}
+	if filter.PageSize == 0 {
+		filter.PageSize = defaultPageSize
+	}
+	if filter.Page < 1 || filter.PageSize < 1 || filter.PageSize > maxPageSize {
+		return ExceptionFilter{}, ErrInvalidInput
+	}
+	return filter, nil
+}
+
+func normalizeReportFilter(filter ReportFilter) (ReportFilter, error) {
+	filter.From = strings.TrimSpace(filter.From)
+	filter.To = strings.TrimSpace(filter.To)
+	var from, to time.Time
+	var err error
+	if filter.From != "" {
+		from, err = time.Parse("2006-01-02", filter.From)
+		if err != nil {
+			return ReportFilter{}, ErrInvalidInput
+		}
+	}
+	if filter.To != "" {
+		to, err = time.Parse("2006-01-02", filter.To)
+		if err != nil {
+			return ReportFilter{}, ErrInvalidInput
+		}
+	}
+	if !from.IsZero() && !to.IsZero() && from.After(to) {
+		return ReportFilter{}, ErrInvalidInput
 	}
 	return filter, nil
 }

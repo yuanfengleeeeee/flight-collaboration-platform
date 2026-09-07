@@ -1,6 +1,6 @@
 import type { CommandStatus } from "@flight/contracts";
 
-export type TaskCommandAction = "accept" | "complete";
+export type TaskCommandAction = "receive" | "start" | "complete";
 
 export interface TaskCommandReceipt {
   id: string;
@@ -78,7 +78,7 @@ function isTaskCommandReceipt(value: unknown): value is TaskCommandReceipt {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<TaskCommandReceipt>;
   return typeof candidate.id === "string"
-    && (candidate.action === "accept" || candidate.action === "complete")
+    && (candidate.action === "receive" || candidate.action === "start" || candidate.action === "complete")
     && typeof candidate.taskPublicID === "string"
     && typeof candidate.assignmentPublicID === "string"
     && typeof candidate.expectedSyncVersion === "number"

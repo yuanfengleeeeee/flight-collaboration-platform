@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClient, ApiClientError } from "./index";
+import { ApiClient, ApiClientError, CoreApiClient } from "./index";
 
 describe("ApiClient", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -47,5 +47,17 @@ describe("ApiClient", () => {
 
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error).toMatchObject({ status: 502, body: { code: "invalid_json" } });
+  });
+
+  it("serializes management filters and write payloads through the Core client", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { items: [], page: 1, page_size: 20, total: 0 } }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const client = new CoreApiClient(new ApiClient({ baseUrl: "http://core.test", getAccessToken: () => "core-token" }));
+
+    await client.listTeams("area/1", true, undefined, 2, 20, "行李");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://core.test/api/v1/teams?area_public_id=area%2F1&include_disabled=true&q=%E8%A1%8C%E6%9D%8E&page=2&page_size=20");
+    const [, init] = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit | undefined];
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer core-token");
   });
 });

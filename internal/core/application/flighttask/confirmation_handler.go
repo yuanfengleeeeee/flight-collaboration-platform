@@ -82,11 +82,15 @@ func principalFromRequest(c *gin.Context) (security.Principal, error) {
 	if err != nil {
 		return security.Principal{}, err
 	}
+	userID, err := parseUint64Value(c.GetHeader("X-Actor-User-ID"))
+	if err != nil {
+		return security.Principal{}, err
+	}
 	global, err := parseBoolHeader(c.GetHeader("X-Actor-Global"))
 	if err != nil {
 		return security.Principal{}, err
 	}
-	return security.Principal{Type: security.PrincipalType(strings.TrimSpace(c.GetHeader("X-Actor-Type"))), PublicID: strings.TrimSpace(c.GetHeader("X-Actor-Public-ID")), Roles: roles, Scopes: security.AccessScope{Global: global, TeamIDs: teams, AreaIDs: areas}}, nil
+	return security.Principal{Type: security.PrincipalType(strings.TrimSpace(c.GetHeader("X-Actor-Type"))), PublicID: strings.TrimSpace(c.GetHeader("X-Actor-Public-ID")), Roles: roles, Scopes: security.AccessScope{Global: global, TeamIDs: teams, AreaIDs: areas, UserID: userID}}, nil
 }
 
 func splitHeader(value string) []string {
@@ -114,6 +118,18 @@ func parseUint64Header(value string) ([]uint64, error) {
 		result = append(result, parsed)
 	}
 	return result, nil
+}
+
+func parseUint64Value(value string) (uint64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || parsed == 0 {
+		return 0, ErrInvalidInput
+	}
+	return parsed, nil
 }
 
 func parseBoolHeader(value string) (bool, error) {

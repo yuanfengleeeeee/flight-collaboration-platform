@@ -77,17 +77,19 @@ type ConfirmationResult struct {
 // render an assigned task and its later Core-confirmed state changes. Edge
 // never becomes the source of these facts.
 type TaskProjectionEventPayload struct {
-	TaskPublicID       string    `json:"task_public_id"`
-	AssignmentPublicID string    `json:"assignment_public_id"`
-	ConfirmationID     string    `json:"confirmation_id"`
-	EmployeePublicID   string    `json:"employee_public_id"`
-	FlightDisplayNo    string    `json:"flight_display_no"`
-	TaskName           string    `json:"task_name"`
-	AreaName           string    `json:"area_name"`
-	PlannedAt          time.Time `json:"planned_at"`
-	BusinessStatus     string    `json:"business_status"`
-	Message            string    `json:"message"`
-	SyncVersion        uint64    `json:"sync_version"`
+	TaskPublicID       string     `json:"task_public_id"`
+	AssignmentPublicID string     `json:"assignment_public_id"`
+	ConfirmationID     string     `json:"confirmation_id"`
+	EmployeePublicID   string     `json:"employee_public_id"`
+	FlightDisplayNo    string     `json:"flight_display_no"`
+	TaskName           string     `json:"task_name"`
+	AreaName           string     `json:"area_name"`
+	PlannedAt          time.Time  `json:"planned_at"`
+	BusinessStatus     string     `json:"business_status"`
+	Message            string     `json:"message"`
+	SyncVersion        uint64     `json:"sync_version"`
+	ReceiptStatus      string     `json:"receipt_status,omitempty"`
+	ReceivedAt         *time.Time `json:"received_at,omitempty"`
 }
 
 // TaskAssignedEventPayload remains an alias for callers of the BVS2-04 API.
@@ -210,7 +212,7 @@ func (s *ConfirmationService) ConfirmTask(ctx context.Context, input Confirmatio
 			businessErr = wrapBusiness(ErrTaskAlreadyAssigned, fmt.Errorf("task status is %s", task.Status))
 			return s.persistConfirmationOutcomeAndAudit(ctx, tx, normalized, requestHash, result, idempotencyRejected, businessErr, now)
 		}
-		if task.Status != taskmodule.StatusAwaitingConfirmation {
+		if task.Status != taskmodule.StatusPendingDispatch && task.Status != taskmodule.StatusAwaitingConfirmation {
 			result = confirmationResultForTask(ResultConfirmationInvalidState, task, normalized.CandidatePublicID)
 			businessErr = wrapBusiness(ErrConfirmationInvalidState, fmt.Errorf("task status is %s", task.Status))
 			return s.persistConfirmationOutcomeAndAudit(ctx, tx, normalized, requestHash, result, idempotencyRejected, businessErr, now)
@@ -276,6 +278,7 @@ func (s *ConfirmationService) ConfirmTask(ctx context.Context, input Confirmatio
 			PublicID: assignmentPublicID, TaskID: task.ID, CandidateID: candidate.ID,
 			PersonnelID: person.ID, PersonnelPublicID: person.PublicID,
 			Status: taskmodule.AssignmentConfirmed, StatusVersion: 0,
+			ReceiptStatus:  taskmodule.AssignmentReceiptPending,
 			ConfirmationID: normalized.ConfirmationID, ConfirmedByPublicID: normalized.Principal.PublicID,
 			ConfirmedAt: now,
 		}
@@ -414,8 +417,8 @@ func hashConfirmationInput(input ConfirmationInput) (string, error) {
 }
 
 func (s *ConfirmationService) authorize(principal security.Principal, task taskmodule.Instance) error {
-	if principal.Type != security.HumanPrincipal {
-		return fmt.Errorf("only human principals may confirm tasks")
+	if principal.Type != security.HumanPrincipal && !(principal.Type == security.MachinePrincipal && principal.MachineUse == AutomaticDispatchMachineUse) {
+		return fmt.Errorf("principal is not allowed to confirm tasks")
 	}
 	if err := s.authorizer.Authorize(principal, "task:assign", security.AccessScope{TeamIDs: []uint64{task.TeamID}}); err != nil {
 		return err
@@ -483,7 +486,7 @@ func (s *ConfirmationService) appendConfirmationAudit(ctx context.Context, tx Co
 }
 
 func newTaskAssignedEvent(task taskmodule.Instance, assignment taskmodule.Assignment, confirmationID, traceID string, occurredAt time.Time) (event.EventEnvelope, error) {
-	payload := TaskAssignedEventPayload{TaskPublicID: task.PublicID, AssignmentPublicID: assignment.PublicID, ConfirmationID: confirmationID, EmployeePublicID: assignment.PersonnelPublicID, FlightDisplayNo: task.FlightDisplayNo, TaskName: task.Name, AreaName: task.AreaName, PlannedAt: task.PlannedAt.UTC(), BusinessStatus: string(taskmodule.StatusAssigned), Message: task.Message, SyncVersion: task.SyncVersion + 1}
+	payload := TaskAssignedEventPayload{TaskPublicID: task.PublicID, AssignmentPublicID: assignment.PublicID, ConfirmationID: confirmationID, EmployeePublicID: assignment.PersonnelPublicID, FlightDisplayNo: task.FlightDisplayNo, TaskName: task.Name, AreaName: task.AreaName, PlannedAt: task.PlannedAt.UTC(), BusinessStatus: string(taskmodule.StatusAssigned), Message: task.Message, SyncVersion: task.SyncVersion + 1, ReceiptStatus: string(assignment.ReceiptStatus)}
 	envelope, err := event.NewEvent("task.assigned.v1", "task", task.PublicID, "core-flight-task", payload)
 	if err != nil {
 		return event.EventEnvelope{}, fmt.Errorf("create task assigned event: %w", err)

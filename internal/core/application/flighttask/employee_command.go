@@ -19,11 +19,16 @@ import (
 )
 
 const (
+	CommandEmployeeReceiveTask  = "employee_receive_task.v1"
+	CommandEmployeeStartTask    = "employee_start_task.v1"
 	CommandEmployeeAcceptTask   = "employee_accept_task.v1"
 	CommandEmployeeCompleteTask = "employee_complete_task.v1"
+	EventTaskReceived           = "task.received.v1"
+	EventTaskStarted            = "task.started.v1"
 	EventTaskAccepted           = "task.accepted.v1"
 	EventTaskCompleted          = "task.completed.v1"
 	ResultCommandApplied        = "applied"
+	ResultAlreadyReceived       = "already_received"
 	ResultAlreadyAccepted       = "already_accepted"
 	ResultAlreadyCompleted      = "already_completed"
 	ResultTaskCancelled         = "task_cancelled"
@@ -78,6 +83,8 @@ type EmployeeCommandTransaction interface {
 	FindTaskForUpdate(ctx context.Context, publicID string) (taskmodule.Instance, error)
 	FindAssignmentForUpdate(ctx context.Context, taskID uint64, publicID string) (taskmodule.Assignment, error)
 	FindPersonnelForUpdate(ctx context.Context, personnelID uint64) (personnelmodule.CandidateRecord, error)
+	MarkAssignmentReceived(ctx context.Context, assignmentID uint64, changedAt time.Time) error
+	UpdateTaskSyncVersion(ctx context.Context, taskID, expectedSyncVersion uint64, changedAt time.Time) error
 	UpdateTaskInProgress(ctx context.Context, taskID, expectedStatusVersion uint64, changedAt time.Time) error
 	UpdateTaskCompleted(ctx context.Context, taskID, expectedStatusVersion uint64, changedAt time.Time) error
 	UpdateAssignmentAccepted(ctx context.Context, assignmentID, expectedStatusVersion uint64, changedAt time.Time) error
@@ -124,7 +131,7 @@ func (s *EmployeeCommandService) Handle(ctx context.Context, txValue any, comman
 	if err := command.Validate(); err != nil {
 		return &CommandError{Code: ResultCommandInvalid, Message: "command envelope is invalid", Cause: err}
 	}
-	if command.CommandType != CommandEmployeeAcceptTask && command.CommandType != CommandEmployeeCompleteTask {
+	if command.CommandType != CommandEmployeeReceiveTask && command.CommandType != CommandEmployeeStartTask && command.CommandType != CommandEmployeeAcceptTask && command.CommandType != CommandEmployeeCompleteTask {
 		return &CommandError{Code: ResultCommandInvalid, Message: "unsupported employee command type"}
 	}
 	var payload employeeTaskCommandPayload
@@ -156,8 +163,14 @@ func (s *EmployeeCommandService) Handle(ctx context.Context, txValue any, comman
 	if assignment.PersonnelPublicID != command.ActorPublicID || person.PublicID != command.ActorPublicID {
 		return &CommandError{Code: ResultNotAssignedToActor, Message: "command actor is not the assigned employee"}
 	}
-	permission := security.Permission("task:accept")
-	if command.CommandType == CommandEmployeeCompleteTask {
+	permission := security.Permission("task:receive")
+	if command.CommandType == CommandEmployeeStartTask {
+		permission = "task:start"
+	} else if command.CommandType == CommandEmployeeAcceptTask {
+		// Keep the legacy command available for old clients, but its old
+		// "accept" meaning is now explicitly the start-execution transition.
+		permission = "task:accept"
+	} else if command.CommandType == CommandEmployeeCompleteTask {
 		permission = "task:complete"
 	}
 	principal := security.Principal{Type: security.HumanPrincipal, PublicID: command.ActorPublicID, Roles: []string{security.RoleStaff}, Scopes: security.AccessScope{UserID: person.ID}}
@@ -168,20 +181,33 @@ func (s *EmployeeCommandService) Handle(ctx context.Context, txValue any, comman
 	if task.Status == taskmodule.StatusCancelled || assignment.Status == taskmodule.AssignmentCancelled {
 		return &CommandError{Code: ResultTaskCancelled, Message: "task has been cancelled"}
 	}
-	if command.CommandType == CommandEmployeeAcceptTask {
+	if command.CommandType == CommandEmployeeReceiveTask {
+		if task.Status == taskmodule.StatusCompleted || assignment.Status == taskmodule.AssignmentCompleted || assignment.ReceiptStatus == taskmodule.AssignmentReceiptReceived {
+			return nil
+		}
+		if task.Status != taskmodule.StatusAssigned || assignment.Status != taskmodule.AssignmentConfirmed || person.WorkState != personnelmodule.WorkStateReserved {
+			return &CommandError{Code: ResultInvalidCommandState, Message: "task is not ready to acknowledge receipt"}
+		}
+		if task.SyncVersion != payload.ExpectedSyncVersion {
+			return &CommandError{Code: ResultStaleAssignment, Message: "task projection version is stale"}
+		}
+		return s.receive(ctx, tx, command, payload, task, assignment)
+	}
+
+	if command.CommandType == CommandEmployeeStartTask || command.CommandType == CommandEmployeeAcceptTask {
 		if task.Status == taskmodule.StatusCompleted || assignment.Status == taskmodule.AssignmentCompleted {
 			return nil
 		}
 		if task.Status == taskmodule.StatusInProgress || assignment.Status == taskmodule.AssignmentAccepted {
 			return nil
 		}
-		if task.Status != taskmodule.StatusAssigned || assignment.Status != taskmodule.AssignmentConfirmed || person.WorkState != personnelmodule.WorkStateReserved {
-			return &CommandError{Code: ResultInvalidCommandState, Message: "task is not ready to accept"}
+		if task.Status != taskmodule.StatusAssigned || assignment.Status != taskmodule.AssignmentConfirmed || assignment.ReceiptStatus != taskmodule.AssignmentReceiptReceived || person.WorkState != personnelmodule.WorkStateReserved {
+			return &CommandError{Code: ResultInvalidCommandState, Message: "task must be acknowledged before execution starts"}
 		}
 		if task.SyncVersion != payload.ExpectedSyncVersion {
 			return &CommandError{Code: ResultStaleAssignment, Message: "task projection version is stale"}
 		}
-		return s.accept(ctx, tx, command, payload, task, assignment, person)
+		return s.start(ctx, tx, command, payload, task, assignment, person)
 	}
 
 	if task.Status == taskmodule.StatusCompleted || assignment.Status == taskmodule.AssignmentCompleted {
@@ -196,7 +222,24 @@ func (s *EmployeeCommandService) Handle(ctx context.Context, txValue any, comman
 	return s.complete(ctx, tx, command, payload, task, assignment, person)
 }
 
-func (s *EmployeeCommandService) accept(ctx context.Context, tx EmployeeCommandTransaction, command event.CommandEnvelope, payload employeeTaskCommandPayload, task taskmodule.Instance, assignment taskmodule.Assignment, person personnelmodule.CandidateRecord) error {
+func (s *EmployeeCommandService) receive(ctx context.Context, tx EmployeeCommandTransaction, command event.CommandEnvelope, payload employeeTaskCommandPayload, task taskmodule.Instance, assignment taskmodule.Assignment) error {
+	now := s.clock.Now().UTC()
+	if err := tx.MarkAssignmentReceived(ctx, assignment.ID, now); err != nil {
+		return fmt.Errorf("mark assignment received: %w", err)
+	}
+	if err := tx.UpdateTaskSyncVersion(ctx, task.ID, task.SyncVersion, now); err != nil {
+		return fmt.Errorf("advance task receipt version: %w", err)
+	}
+	receivedAt := now
+	assignment.ReceiptStatus = taskmodule.AssignmentReceiptReceived
+	assignment.ReceivedAt = &receivedAt
+	if err := tx.AppendAudit(ctx, coresync.AuditRecord{ActorType: string(security.HumanPrincipal), ActorID: command.ActorPublicID, Action: command.CommandType, ResourceType: "task_assignment", ResourceID: assignment.PublicID, Result: ResultCommandApplied, TraceID: command.TraceID, OccurredAt: now}); err != nil {
+		return fmt.Errorf("append receipt audit: %w", err)
+	}
+	return s.writeTaskEvent(ctx, tx, command, task, assignment, EventTaskReceived, taskmodule.StatusAssigned, task.SyncVersion+1, now)
+}
+
+func (s *EmployeeCommandService) start(ctx context.Context, tx EmployeeCommandTransaction, command event.CommandEnvelope, payload employeeTaskCommandPayload, task taskmodule.Instance, assignment taskmodule.Assignment, person personnelmodule.CandidateRecord) error {
 	now := s.clock.Now().UTC()
 	if err := tx.UpdateAssignmentAccepted(ctx, assignment.ID, assignment.StatusVersion, now); err != nil {
 		return fmt.Errorf("accept assignment: %w", err)
@@ -210,7 +253,7 @@ func (s *EmployeeCommandService) accept(ctx context.Context, tx EmployeeCommandT
 	if err := s.writeTransitionHistory(ctx, tx, command, payload.Note, task, assignment, person, taskmodule.StatusInProgress, taskmodule.AssignmentAccepted, personnelmodule.WorkStateBusy, now); err != nil {
 		return err
 	}
-	return s.writeTaskEvent(ctx, tx, command, task, assignment, EventTaskAccepted, taskmodule.StatusInProgress, task.SyncVersion+1, now)
+	return s.writeTaskEvent(ctx, tx, command, task, assignment, EventTaskStarted, taskmodule.StatusInProgress, task.SyncVersion+1, now)
 }
 
 func (s *EmployeeCommandService) complete(ctx context.Context, tx EmployeeCommandTransaction, command event.CommandEnvelope, payload employeeTaskCommandPayload, task taskmodule.Instance, assignment taskmodule.Assignment, person personnelmodule.CandidateRecord) error {
@@ -266,7 +309,7 @@ func (s *EmployeeCommandService) writeTransitionHistory(ctx context.Context, tx 
 }
 
 func (s *EmployeeCommandService) writeTaskEvent(ctx context.Context, tx EmployeeCommandTransaction, command event.CommandEnvelope, task taskmodule.Instance, assignment taskmodule.Assignment, eventType string, status taskmodule.Status, syncVersion uint64, occurredAt time.Time) error {
-	payload := TaskProjectionEventPayload{TaskPublicID: task.PublicID, AssignmentPublicID: assignment.PublicID, EmployeePublicID: assignment.PersonnelPublicID, FlightDisplayNo: task.FlightDisplayNo, TaskName: task.Name, AreaName: task.AreaName, PlannedAt: task.PlannedAt.UTC(), BusinessStatus: string(status), Message: task.Message, SyncVersion: syncVersion}
+	payload := TaskProjectionEventPayload{TaskPublicID: task.PublicID, AssignmentPublicID: assignment.PublicID, EmployeePublicID: assignment.PersonnelPublicID, FlightDisplayNo: task.FlightDisplayNo, TaskName: task.Name, AreaName: task.AreaName, PlannedAt: task.PlannedAt.UTC(), BusinessStatus: string(status), Message: task.Message, SyncVersion: syncVersion, ReceiptStatus: string(assignment.ReceiptStatus), ReceivedAt: assignment.ReceivedAt}
 	envelope, err := event.NewEvent(eventType, "task", task.PublicID, "core-flight-task", payload)
 	if err != nil {
 		return fmt.Errorf("create %s event: %w", eventType, err)

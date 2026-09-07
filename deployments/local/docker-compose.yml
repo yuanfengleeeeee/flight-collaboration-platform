@@ -52,6 +52,7 @@ services:
       FLIGHT_CORE_PORT: 8081
       FLIGHT_EDGE_PORT: 8082
       FLIGHT_CORE_ALLOW_DEV_ACTOR_HEADERS: "true"
+      FLIGHT_CORE_FLIGHT_SOURCE_API_KEY: change-me-local-flight-source-key
       FLIGHT_IDENTITY_INTERNAL_API_KEY: change-me-local-identity-key
     depends_on:
       core-mysql: {condition: service_healthy}
@@ -154,7 +155,7 @@ services:
 
   edge-redis:
     image: redis:7-alpine
-    ports: ["6380:6379"]
+    ports: ["${EDGE_REDIS_HOST_PORT:-6380}:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

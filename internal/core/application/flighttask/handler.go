@@ -8,15 +8,16 @@ import (
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/observability"
 )
 
-// RegisterRoutes exposes the internal Core arrival input. Authentication for
-// external flight systems remains an integration concern; this handler only
-// translates HTTP metadata into the application input and never touches GORM.
-func RegisterRoutes(router gin.IRouter, service *Service) {
+// RegisterRoutes exposes the internal Core arrival input. It is deliberately
+// mounted under /internal/integration and expects the caller to provide the
+// upstream-provider authentication middleware.
+func RegisterRoutes(router gin.IRouter, service *Service, middleware ...gin.HandlerFunc) {
 	if router == nil || service == nil {
 		return
 	}
 	handler := Handler{service: service}
-	router.POST("/api/v1/flights/:flightPublicID/arrival", handler.RecordArrival)
+	chain := append(append([]gin.HandlerFunc{}, middleware...), handler.RecordArrival)
+	router.POST("/internal/integration/v1/flights/:flightPublicID/arrival", chain...)
 }
 
 type Handler struct {

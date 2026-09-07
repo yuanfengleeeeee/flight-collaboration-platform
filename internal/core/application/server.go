@@ -2,11 +2,13 @@ package application
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,8 +16,13 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/adminauth"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/adminquery"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flightsync"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flighttask"
 	coreidentity "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/identity"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/management"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/managementrealtime"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/operations"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/taskchange"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/config"
 	platformhealth "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/health"
 	platformhttpauth "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/httpauth"
@@ -71,6 +78,31 @@ func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAnd
 // receive only the already-resolved Core principal; they never call an external
 // identity provider or inspect SSO state directly.
 func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuth(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService, identityService *coreidentity.Service, identitySharedKey string, adminAuthService *adminauth.Service, adminQueryService *adminquery.Service) *Server {
+	return NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagement(cfg, db, redisClient, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, identitySharedKey, adminAuthService, adminQueryService, nil)
+}
+
+// NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagement
+// adds the Core management workbench without changing the existing constructor
+// used by foundation and slice tests.
+func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagement(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService, identityService *coreidentity.Service, identitySharedKey string, adminAuthService *adminauth.Service, adminQueryService *adminquery.Service, managementService *management.Service) *Server {
+	return NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSync(cfg, db, redisClient, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, identitySharedKey, adminAuthService, adminQueryService, managementService, nil)
+}
+
+func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSync(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService, identityService *coreidentity.Service, identitySharedKey string, adminAuthService *adminauth.Service, adminQueryService *adminquery.Service, managementService *management.Service, flightSyncService *flightsync.Service) *Server {
+	return NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSyncAndOperations(cfg, db, redisClient, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, identitySharedKey, adminAuthService, adminQueryService, managementService, flightSyncService, nil)
+}
+
+func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSyncAndOperations(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService, identityService *coreidentity.Service, identitySharedKey string, adminAuthService *adminauth.Service, adminQueryService *adminquery.Service, managementService *management.Service, flightSyncService *flightsync.Service, operationsService *operations.Service) *Server {
+	return NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSyncAndOperationsAndTaskChange(cfg, db, redisClient, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, identitySharedKey, adminAuthService, adminQueryService, managementService, flightSyncService, operationsService, nil)
+}
+
+func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSyncAndOperationsAndTaskChange(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService, identityService *coreidentity.Service, identitySharedKey string, adminAuthService *adminauth.Service, adminQueryService *adminquery.Service, managementService *management.Service, flightSyncService *flightsync.Service, operationsService *operations.Service, taskChangeService *taskchange.Service) *Server {
+	return NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSyncAndOperationsAndTaskChangeAndRealtime(cfg, db, redisClient, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, identitySharedKey, adminAuthService, adminQueryService, managementService, flightSyncService, operationsService, taskChangeService, nil)
+}
+
+// NewServerWithFlightTask...AndRealtime adds the management hint stream while
+// preserving the older constructor used by slice and foundation tests.
+func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSyncAndOperationsAndTaskChangeAndRealtime(cfg config.ServiceConfig, db *gorm.DB, redisClient *redis.Client, log *zap.Logger, arrivalService *flighttask.Service, confirmationService *flighttask.ConfirmationService, cancellationService *flighttask.CancellationService, authenticator platformsecurity.Authenticator, taskQueryService *flighttask.TaskQueryService, identityService *coreidentity.Service, identitySharedKey string, adminAuthService *adminauth.Service, adminQueryService *adminquery.Service, managementService *management.Service, flightSyncService *flightsync.Service, operationsService *operations.Service, taskChangeService *taskchange.Service, managementRealtimeService *managementrealtime.Service) *Server {
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -105,7 +137,8 @@ func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAnd
 		}
 		c.JSON(http.StatusOK, gin.H{"component": "core-api", "architecture": "v2", "business_mode": businessMode})
 	})
-	flighttask.RegisterRoutes(r, arrivalService)
+	flighttask.RegisterRoutes(r, arrivalService, flightSourceMiddleware(cfg))
+	flightsync.RegisterRoutes(r, flightSyncService, flightSourceMiddleware(cfg))
 	var authMiddleware gin.HandlerFunc
 	if authenticator != nil || cfg.AllowDevActorHeaders {
 		var resolver platformhttpauth.PrincipalResolver
@@ -135,9 +168,54 @@ func NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAnd
 			adminquery.RegisterRoutes(r, adminQueryService, authMiddleware)
 		}
 	}
+	if managementService != nil {
+		if authMiddleware == nil {
+			management.RegisterRoutes(r, managementService)
+		} else {
+			management.RegisterRoutes(r, managementService, authMiddleware)
+		}
+	}
+	if operationsService != nil {
+		if authMiddleware == nil {
+			operations.RegisterRoutes(r, operationsService)
+		} else {
+			operations.RegisterRoutes(r, operationsService, authMiddleware)
+		}
+	}
+	if taskChangeService != nil {
+		if authMiddleware == nil {
+			taskchange.RegisterRoutes(r, taskChangeService)
+		} else {
+			taskchange.RegisterRoutes(r, taskChangeService, authMiddleware)
+		}
+	}
+	if managementRealtimeService != nil {
+		if authMiddleware == nil {
+			managementrealtime.RegisterRoutes(r, managementRealtimeService)
+		} else {
+			managementrealtime.RegisterRoutes(r, managementRealtimeService, authMiddleware)
+		}
+	}
 	return &Server{
 		cfg: cfg, db: db, redis: redisClient, log: log, started: started,
 		httpServer: &http.Server{Addr: fmt.Sprintf(":%d", cfg.Port), Handler: r, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second},
+	}
+}
+
+func flightSourceMiddleware(cfg config.ServiceConfig) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := strings.TrimSpace(cfg.FlightSourceAPIKey)
+		if key == "" && cfg.AllowDevActorHeaders {
+			c.Next()
+			return
+		}
+		provided := strings.TrimSpace(c.GetHeader("X-Flight-Source-Key"))
+		if key == "" || len(provided) != len(key) || subtle.ConstantTimeCompare([]byte(provided), []byte(key)) != 1 {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "flight_source_unauthorized", "message": "flight source authentication is required"})
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
 

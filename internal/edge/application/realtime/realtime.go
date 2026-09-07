@@ -30,6 +30,7 @@ const (
 	Protocol             = "flight.realtime.v1"
 	TicketPath           = "/api/v1/realtime/ticket"
 	WebSocketPath        = "/api/v1/ws"
+	NativeWebSocketPath  = "/api/v1/ws/native"
 	ticketProtocolPrefix = "flight.realtime.ticket."
 
 	defaultHeartbeatInterval = 25 * time.Second
@@ -264,6 +265,32 @@ func (endpoint *Endpoint) ServeHTTP(writer http.ResponseWriter, request *http.Re
 		},
 	}
 	server.ServeHTTP(writer, request)
+}
+
+// ServeNativeHTTP is for native miniapp WebSocket clients. Native runtimes do
+// not participate in the browser same-origin model, so the one-time ticket
+// in Sec-WebSocket-Protocol is the authentication boundary for this path.
+// Browser clients continue to use ServeHTTP and its strict origin check.
+func (endpoint *Endpoint) ServeNativeHTTP(writer http.ResponseWriter, request *http.Request, employeePublicID string) {
+	if !endpoint.Ready() || strings.TrimSpace(employeePublicID) == "" {
+		http.Error(writer, ErrRealtimeUnavailable.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	server := websocket.Server{
+		Handshake: endpoint.nativeHandshake,
+		Handler: func(socket *websocket.Conn) {
+			endpoint.serveConnection(socket, employeePublicID)
+		},
+	}
+	server.ServeHTTP(writer, request)
+}
+
+func (endpoint *Endpoint) nativeHandshake(config *websocket.Config, _ *http.Request) error {
+	if !containsProtocol(config.Protocol, Protocol) {
+		return ErrProtocolRequired
+	}
+	config.Protocol = []string{Protocol}
+	return nil
 }
 
 func (endpoint *Endpoint) handshake(config *websocket.Config, request *http.Request) error {

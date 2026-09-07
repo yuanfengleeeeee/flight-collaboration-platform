@@ -103,7 +103,7 @@ function devActorHeaders(): Record<string, string> {
     "X-Actor-Type": "human",
     "X-Actor-Public-ID": env.VITE_DEV_ACTOR_PUBLIC_ID ?? "dev-manager",
     "X-Actor-Roles": adminRuntime.devActorRole,
-    "X-Actor-Global": adminRuntime.devActorRole === "manager" || adminRuntime.devActorRole === "admin" ? "true" : "false",
+    "X-Actor-Global": adminRuntime.devActorRole === "manager" || adminRuntime.devActorRole === "admin" || adminRuntime.devActorRole === "supervisor" ? "true" : "false",
     "X-Actor-Team-IDs": env.VITE_DEV_ACTOR_TEAM_IDS ?? "",
     "X-Actor-Area-IDs": env.VITE_DEV_ACTOR_AREA_IDS ?? "",
   };

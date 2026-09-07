@@ -22,7 +22,7 @@ func (tx *transaction) FindAssignmentForUpdate(ctx context.Context, taskID uint6
 	err := tx.db.WithContext(ctx).
 		Table("task_assignment AS a").
 		Select(`a.id, a.public_id, a.task_id, a.candidate_id, a.personnel_id, a.status,
-			a.status_version, a.confirmation_id, a.confirmed_by_public_id, a.confirmed_at,
+			a.status_version, a.receipt_status, a.received_at, a.confirmation_id, a.confirmed_by_public_id, a.confirmed_at,
 			p.public_id AS personnel_public_id`).
 		Joins("JOIN personnel AS p ON p.id = a.personnel_id").
 		Where("a.task_id = ? AND a.public_id = ?", taskID, publicID).
@@ -32,6 +32,35 @@ func (tx *transaction) FindAssignmentForUpdate(ctx context.Context, taskID uint6
 		return taskmodule.Assignment{}, normalizeNotFound(err)
 	}
 	return row.toDomain(), nil
+}
+
+func (tx *transaction) MarkAssignmentReceived(ctx context.Context, assignmentID uint64, changedAt time.Time) error {
+	result := tx.db.WithContext(ctx).Table("task_assignment").Where("id = ? AND receipt_status = ?", assignmentID, string(taskmodule.AssignmentReceiptPending)).Updates(map[string]any{
+		"receipt_status": string(taskmodule.AssignmentReceiptReceived),
+		"received_at":    changedAt.UTC(),
+		"updated_at":     changedAt.UTC(),
+	})
+	if result.Error != nil {
+		return fmt.Errorf("mark assignment received: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return &flighttask.CommandError{Code: flighttask.ResultStaleAssignment, Message: "assignment receipt changed before employee command was applied"}
+	}
+	return nil
+}
+
+func (tx *transaction) UpdateTaskSyncVersion(ctx context.Context, taskID, expectedSyncVersion uint64, changedAt time.Time) error {
+	result := tx.db.WithContext(ctx).Table("task_instance").Where("id = ? AND sync_version = ?", taskID, expectedSyncVersion).Updates(map[string]any{
+		"sync_version": expectedSyncVersion + 1,
+		"updated_at":   changedAt.UTC(),
+	})
+	if result.Error != nil {
+		return fmt.Errorf("update task receipt version: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return &flighttask.CommandError{Code: flighttask.ResultStaleAssignment, Message: "task receipt version changed before employee command was applied"}
+	}
+	return nil
 }
 
 func (tx *transaction) UpdateTaskInProgress(ctx context.Context, taskID, expectedStatusVersion uint64, changedAt time.Time) error {
@@ -178,21 +207,23 @@ func (tx *transaction) CreateProbeEvent(ctx context.Context, value coresync.Prob
 }
 
 type taskCommandAssignmentRow struct {
-	ID                  uint64    `gorm:"column:id"`
-	PublicID            string    `gorm:"column:public_id"`
-	TaskID              uint64    `gorm:"column:task_id"`
-	CandidateID         uint64    `gorm:"column:candidate_id"`
-	PersonnelID         uint64    `gorm:"column:personnel_id"`
-	Status              string    `gorm:"column:status"`
-	StatusVersion       uint64    `gorm:"column:status_version"`
-	ConfirmationID      string    `gorm:"column:confirmation_id"`
-	ConfirmedByPublicID string    `gorm:"column:confirmed_by_public_id"`
-	ConfirmedAt         time.Time `gorm:"column:confirmed_at"`
-	PersonnelPublicID   string    `gorm:"column:personnel_public_id"`
+	ID                  uint64     `gorm:"column:id"`
+	PublicID            string     `gorm:"column:public_id"`
+	TaskID              uint64     `gorm:"column:task_id"`
+	CandidateID         uint64     `gorm:"column:candidate_id"`
+	PersonnelID         uint64     `gorm:"column:personnel_id"`
+	Status              string     `gorm:"column:status"`
+	StatusVersion       uint64     `gorm:"column:status_version"`
+	ReceiptStatus       string     `gorm:"column:receipt_status"`
+	ReceivedAt          *time.Time `gorm:"column:received_at"`
+	ConfirmationID      string     `gorm:"column:confirmation_id"`
+	ConfirmedByPublicID string     `gorm:"column:confirmed_by_public_id"`
+	ConfirmedAt         time.Time  `gorm:"column:confirmed_at"`
+	PersonnelPublicID   string     `gorm:"column:personnel_public_id"`
 }
 
 func (row taskCommandAssignmentRow) toDomain() taskmodule.Assignment {
-	return taskmodule.Assignment{ID: row.ID, PublicID: row.PublicID, TaskID: row.TaskID, CandidateID: row.CandidateID, PersonnelID: row.PersonnelID, PersonnelPublicID: row.PersonnelPublicID, Status: taskmodule.AssignmentStatus(row.Status), StatusVersion: row.StatusVersion, ConfirmationID: row.ConfirmationID, ConfirmedByPublicID: row.ConfirmedByPublicID, ConfirmedAt: row.ConfirmedAt.UTC()}
+	return taskmodule.Assignment{ID: row.ID, PublicID: row.PublicID, TaskID: row.TaskID, CandidateID: row.CandidateID, PersonnelID: row.PersonnelID, PersonnelPublicID: row.PersonnelPublicID, Status: taskmodule.AssignmentStatus(row.Status), StatusVersion: row.StatusVersion, ReceiptStatus: taskmodule.AssignmentReceiptStatus(row.ReceiptStatus), ReceivedAt: row.ReceivedAt, ConfirmationID: row.ConfirmationID, ConfirmedByPublicID: row.ConfirmedByPublicID, ConfirmedAt: row.ConfirmedAt.UTC()}
 }
 
 type coreInboxCommandRow struct {

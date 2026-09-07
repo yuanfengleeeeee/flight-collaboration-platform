@@ -14,8 +14,12 @@ import (
 
 	coremysql "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/adapter/mysql"
 	coreapp "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application"
+	coreflightsync "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flightsync"
+	coreflighttask "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flighttask"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/module/iam"
 	coresync "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/sync"
 	integrationsync "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/integration/sync"
+	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/clock"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/config"
 	platformlogger "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/logger"
 	platformmysql "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/mysql"
@@ -52,8 +56,16 @@ func main() {
 		coreStore = coresync.NewSQLStore(db)
 	}
 	var commandProcessor integrationsync.CommandProcessor = coreStore
+	var flightSyncService *coreflightsync.Service
+	var receiptTimeoutReassigner *coreflighttask.ReceiptTimeoutReassigner
 	if db != nil {
 		commandProcessor = coremysql.NewFlightTaskRepository(db)
+		repository := coremysql.NewFlightTaskRepository(db)
+		arrivalService := coreflighttask.NewService(repository, clock.Real{})
+		confirmationService := coreflighttask.NewConfirmationService(repository, iam.NewAuthorizer(), clock.Real{})
+		arrivalService.SetAutomaticDispatcher(coreflighttask.NewAutomaticDispatcher(confirmationService, nil))
+		flightSyncService = coreflightsync.NewService(coremysql.NewFlightSourceRepository(db), arrivalService, clock.Real{})
+		receiptTimeoutReassigner = coreflighttask.NewReceiptTimeoutReassigner(repository)
 	}
 	transport, err := integrationsync.NewHTTPTransportWithTLS(cfg.Sync.EdgeBaseURL, time.Duration(cfg.Sync.RequestTimeoutMS)*time.Millisecond, cfg.Sync.TLS)
 	if err != nil {
@@ -109,6 +121,20 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if receiptTimeoutReassigner != nil {
+				timeout := coreflighttask.DefaultAssignmentReceiptTimeout
+				if cfg.Sync.AssignmentReceiptTimeoutSeconds > 0 {
+					timeout = time.Duration(cfg.Sync.AssignmentReceiptTimeoutSeconds) * time.Second
+				}
+				if _, err := receiptTimeoutReassigner.Run(ctx, time.Now().UTC(), timeout, cfg.Sync.BatchSize, workerID); err != nil {
+					log.Warn("reassign unreceived task assignments failed", zap.Error(err))
+				}
+			}
+			if flightSyncService != nil {
+				if _, err := flightSyncService.ApplyPending(ctx, cfg.Sync.BatchSize, workerID); err != nil {
+					log.Warn("apply flight source inbox failed", zap.Error(err))
+				}
+			}
 			if err := syncWorker.DeliverOutbox(ctx); err != nil {
 				log.Warn("deliver core outbox failed", zap.Error(err))
 			}

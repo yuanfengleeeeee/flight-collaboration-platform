@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	ClientEmployeeMiniapp = "employee-miniapp"
-	ClientEmployeeWeb     = "employee-web"
+	ClientEmployeeMiniapp      = "employee-miniapp"
+	ClientEmployeeWeComMiniapp = "employee-wecom-miniapp"
+	ClientEmployeeWeb          = "employee-web"
 
 	ProviderPersonalWechat = "personal_wechat"
 	ProviderWeCom          = "wecom"
@@ -80,6 +81,12 @@ type ProviderVerifier interface {
 	Verify(context.Context, string, string, string) (ExternalIdentity, error)
 }
 
+// ClientAwareProviderVerifier lets a provider distinguish browser OAuth codes
+// from native miniapp codes even when both use the same provider name.
+type ClientAwareProviderVerifier interface {
+	VerifyForClient(context.Context, string, string, string, string) (ExternalIdentity, error)
+}
+
 // ProviderAppResolver lets a verifier keep the provider application scope on
 // the server. The client may select a provider, but it must not select which
 // AppID/CorpID owns the external identity binding.
@@ -129,7 +136,7 @@ func (s *Service) PasswordLogin(ctx context.Context, input PasswordLoginInput) (
 	if input.EmployeeNo == "" || input.Password == "" || !validClient(input.Client) {
 		return PasswordLoginResult{}, ErrInvalidCredentials
 	}
-	if input.Provider != "" && !validProvider(input.Provider) {
+	if input.Provider != "" && (!validProvider(input.Provider) || !validClientProvider(input.Client, input.Provider)) {
 		return PasswordLoginResult{}, ErrUnsupportedProvider
 	}
 	now := s.clock.Now().UTC()
@@ -180,10 +187,10 @@ func (s *Service) Exchange(ctx context.Context, provider, providerCode, client, 
 	}
 	provider = strings.TrimSpace(provider)
 	client = strings.TrimSpace(client)
-	if !validProvider(provider) || !validClient(client) {
+	if !validProvider(provider) || !validClient(client) || !validClientProvider(client, provider) {
 		return Staff{}, ErrUnsupportedProvider
 	}
-	identity, err := s.providerVerifier.Verify(ctx, provider, strings.TrimSpace(providerCode), strings.TrimSpace(redirectURI))
+	identity, err := s.verifyProvider(ctx, provider, providerCode, client, redirectURI)
 	if err != nil {
 		return Staff{}, err
 	}
@@ -200,10 +207,10 @@ func (s *Service) CompleteBinding(ctx context.Context, ticket, provider, provide
 	}
 	provider = strings.TrimSpace(provider)
 	client = strings.TrimSpace(client)
-	if !validProvider(provider) || strings.TrimSpace(ticket) == "" || !validClient(client) {
+	if !validProvider(provider) || !validClientProvider(client, provider) || strings.TrimSpace(ticket) == "" || !validClient(client) {
 		return Staff{}, ErrBindingTicketInvalid
 	}
-	identity, err := s.providerVerifier.Verify(ctx, provider, strings.TrimSpace(providerCode), strings.TrimSpace(redirectURI))
+	identity, err := s.verifyProvider(ctx, provider, providerCode, client, redirectURI)
 	if err != nil {
 		return Staff{}, err
 	}
@@ -211,11 +218,31 @@ func (s *Service) CompleteBinding(ctx context.Context, ticket, provider, provide
 }
 
 func validClient(value string) bool {
-	return value == ClientEmployeeMiniapp || value == ClientEmployeeWeb
+	return value == ClientEmployeeMiniapp || value == ClientEmployeeWeComMiniapp || value == ClientEmployeeWeb
 }
 
 func validProvider(value string) bool {
 	return value == ProviderPersonalWechat || value == ProviderWeCom
+}
+
+func validClientProvider(client, provider string) bool {
+	switch client {
+	case ClientEmployeeMiniapp:
+		return provider == ProviderPersonalWechat
+	case ClientEmployeeWeComMiniapp:
+		return provider == ProviderWeCom
+	case ClientEmployeeWeb:
+		return validProvider(provider)
+	default:
+		return false
+	}
+}
+
+func (s *Service) verifyProvider(ctx context.Context, provider, providerCode, client, redirectURI string) (ExternalIdentity, error) {
+	if verifier, ok := s.providerVerifier.(ClientAwareProviderVerifier); ok {
+		return verifier.VerifyForClient(ctx, provider, strings.TrimSpace(providerCode), client, strings.TrimSpace(redirectURI))
+	}
+	return s.providerVerifier.Verify(ctx, provider, strings.TrimSpace(providerCode), strings.TrimSpace(redirectURI))
 }
 
 // DevelopmentProviderVerifier accepts only an explicit mock code. It prevents

@@ -34,7 +34,10 @@ const (
 	RoleAdmin   = "admin"
 	RoleManager = "manager"
 	RoleLeader  = "leader"
-	RoleStaff   = "staff"
+	// RoleSupervisor is the read-only management role for a responsible
+	// leader. Its area/team scope controls which operational events it sees.
+	RoleSupervisor = "supervisor"
+	RoleStaff      = "staff"
 )
 
 type IdentityProvider interface {

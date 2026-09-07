@@ -15,7 +15,7 @@ function memoryStorage(): Storage {
 
 const receipt: TaskCommandReceipt = {
   id: "command-1",
-  action: "accept",
+  action: "receive",
   taskPublicID: "task-1",
   assignmentPublicID: "assignment-1",
   expectedSyncVersion: 2,

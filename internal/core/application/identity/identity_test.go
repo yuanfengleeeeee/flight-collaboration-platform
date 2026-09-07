@@ -110,6 +110,20 @@ func TestPasswordLoginForMiniappCanIssueSessionWithoutExternalBinding(t *testing
 	}
 }
 
+func TestWeComMiniappIsASeparateEmployeeClient(t *testing.T) {
+	repository := &fakeRepository{staff: Staff{PublicID: "staff-1", EmployeeNo: "E001", DisplayName: "员工一", Role: "staff"}, ticket: "ticket-1"}
+	service := NewService(repository, DevelopmentProviderVerifier{}, fixedClock{value: time.Unix(100, 0)}, ServiceConfig{})
+	result, err := service.PasswordLogin(context.Background(), PasswordLoginInput{
+		EmployeeNo: "E001", Password: "correct horse", Client: ClientEmployeeWeComMiniapp, Provider: ProviderWeCom,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != StateBindingRequired || repository.lastClient != ClientEmployeeWeComMiniapp {
+		t.Fatalf("unexpected enterprise WeChat miniapp login: %#v, client=%q", result, repository.lastClient)
+	}
+}
+
 func TestBindingAndExchangeUseProviderSubjectWithoutRealProvider(t *testing.T) {
 	repository := &fakeRepository{staff: Staff{PublicID: "staff-1", EmployeeNo: "E001"}, ticket: "ticket-1"}
 	service := NewService(repository, DevelopmentProviderVerifier{}, fixedClock{value: time.Unix(100, 0)}, ServiceConfig{})

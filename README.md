@@ -1,10 +1,10 @@
-# 航空保障智能协同平台
+# 航空客运地面代理协同平台
 
 ## Architecture v2.0 Foundation
 
 本仓库当前基线为：单仓库、内网 Core 模块化单体、云端 Edge 接入服务、Core/Edge 独立 MySQL、Core 唯一事实源、Edge Projection、Outbox/Inbox 可靠双向同步。Architecture v2.0 Foundation 已于 2026-08-13 完成容器级验收，状态为 `ACCEPTED / FROZEN`。
 
-项目现已进入 `Phase 2 — Business Implementation`：BVS2-01 业务设计已 `FROZEN`，BVS2-02 Core 数据与版本化 Migration、BVS2-03 `Flight → Task → Candidate`、BVS2-04 `Leader Confirm` 已完成，BVS2-05 `Edge Projection → Employee Command` 正在实施。详见 [Business Slice v2](memory-bank/business-slice-v2-flight-task.md)：Flight → Task → Personnel → Leader Confirm → Edge → Employee → Complete。旧 B3 现场不直接恢复；业务必须适应已冻结架构。规范见 [Architecture v2.0](docs/architecture/architecture-v2.md) 与 [ADR](docs/adr/)。
+项目现已进入 `Phase 2 — Business Implementation` 收口阶段：BVS2-01 至 BVS2-07、T0-1 至 T0-5 的当前代码切片已落地，后续重点是生产配置、故障/性能门禁和正式验收。当前业务流程为“外部航班同步 → `pending_dispatch` 自动派发 → Core/Edge 三层握手 → 员工 `received` 收件 → `start` 执行 → `complete` 完成”；员工没有拒绝任务的业务动作，冲突和异常必须提交变更申请并由值班经理/管理员审批。详见 [当前业务流程基线](docs/business-process-v2.md) 和 [Business Slice v2](memory-bank/business-slice-v2-flight-task.md)。旧 B3 现场不直接恢复；业务必须适应已冻结架构。规范见 [Architecture v2.0](docs/architecture/architecture-v2.md) 与 [ADR](docs/adr/)。
 
 ## 入口
 
@@ -33,10 +33,11 @@ docker compose -f deployments/local/docker-compose.yml up -d
 Core/Edge 健康检查均为 `/health/live` 和 `/health/ready`。Core/Edge migration 分别位于 `migrations/core/mysql` 和 `migrations/edge/mysql`；服务启动不执行 GORM `AutoMigrate`。
 
 不要执行 `docker compose down -v`、`TRUNCATE`、`DROP DATABASE` 或未经确认的 destructive migration；本机已有 MySQL 时使用可配置宿主机端口，不停止已有服务。
-当前最新进度：BVS2-05 已完成代码与隔离数据库验证，BVS2-06 已完成首个 Task Cancel 功能步骤（Core 管理取消、事务历史/Audit/Outbox/幂等和 SQL 验证）；完整 Compose 闭环、正式认证和 Task CRUD 仍在后续实施。
-## BVS2-06 current delivery
+当前最新进度：任务自动派发、收件回执、超时重派、任务变更申请/经理审批、航班源预同步与 fallback、岗位/能力字典 CRUD、管理端角色 Scope 和服务端分页均已写入当前代码/契约；真实航班 Provider、真实平台凭据/域名、生产告警、多副本故障门禁、性能基线和正式主数据仍待验收。任务不是通用手工 CRUD：航班事实由外部源进入，任务由到达事件和启用模板生成。
+## Current business delivery
 
-- Compose full-chain and physical Worker/Edge recovery acceptance has passed on isolated project `bvs206-closure`.
-- Core and Edge business routes use Bearer JWT in normal configuration; TLS/mTLS is configurable for API listeners and Worker sync transport. Local Compose keeps TLS disabled and explicitly enables development actor-header compatibility.
-- Core Task read CRUD is available at `GET /api/v1/tasks` and `GET /api/v1/tasks/{taskPublicID}` with RBAC/scope filtering. Task creation remains the transactional Flight Arrival flow; Confirm and Cancel are the lifecycle mutations. Manual generic create, arbitrary PATCH, and hard delete await a frozen product contract.
+- 自动派发、三层握手、收件超时重派、任务变更审批、航班源预同步/fallback、岗位/能力字典 CRUD、管理 Scope 和服务端分页已进入当前代码/契约。
+- Core 与 Edge 业务路由在正常配置下使用 Bearer JWT；TLS/mTLS 可配置，Local Compose 保持开发环境的显式 actor-header 兼容开关。
+- Core 任务查询使用 `GET /api/v1/tasks` 和 `GET /api/v1/tasks/{taskPublicID}`，按 RBAC/Scope 过滤；任务只能由外部航班到达 + 启用模板生成，不提供通用手工创建、任意 PATCH 或硬删除。
+- 员工任务操作为 `received`、`start`、`complete`；`received` 仅收件，不是同意或拒绝。
 - See [Task CRUD contract](docs/task-crud-contract-v2.md), [Core OpenAPI](api/core/openapi.yaml), and [handoff](HANDOFF.md).

@@ -15,8 +15,10 @@ func RegisterTaskQueryRoutes(router gin.IRouter, service *TaskQueryService, midd
 	handler := TaskQueryHandler{service: service}
 	listHandlers := append(append([]gin.HandlerFunc{}, middleware...), handler.List)
 	detailHandlers := append(append([]gin.HandlerFunc{}, middleware...), handler.Get)
+	historyHandlers := append(append([]gin.HandlerFunc{}, middleware...), handler.History)
 	router.GET("/api/v1/tasks", listHandlers...)
 	router.GET("/api/v1/tasks/:taskPublicID", detailHandlers...)
+	router.GET("/api/v1/tasks/:taskPublicID/history", historyHandlers...)
 }
 
 type TaskQueryHandler struct {
@@ -49,6 +51,20 @@ func (h TaskQueryHandler) Get(c *gin.Context) {
 		return
 	}
 	result, err := h.service.GetTask(c.Request.Context(), principal, c.Param("taskPublicID"))
+	if err != nil {
+		writeError(c, statusForError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": result, "request_id": observability.RequestID(c), "trace_id": observability.TraceID(c)})
+}
+
+func (h TaskQueryHandler) History(c *gin.Context) {
+	principal, err := principalFromRequest(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := h.service.GetTaskHistory(c.Request.Context(), principal, c.Param("taskPublicID"))
 	if err != nil {
 		writeError(c, statusForError(err), err)
 		return

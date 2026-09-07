@@ -6,6 +6,7 @@
     "dev:admin": "pnpm --filter @flight/admin-web dev",
     "dev:employee": "pnpm --filter @flight/employee-web dev",
     "build": "pnpm -r build",
+    "build:miniapps": "node scripts/build-miniapps.mjs",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "test": "vitest run",
@@ -23,6 +24,7 @@
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.16.0",
     "vite": "^5.4.10",
-    "vitest": "^2.1.5"
+    "vitest": "^2.1.5",
+    "esbuild": "^0.21.5"
   }
 }

@@ -1,17 +1,22 @@
-export type Role = "admin" | "manager" | "leader" | "staff";
+export type Role = "admin" | "manager" | "leader" | "supervisor" | "staff";
 export type Provider = "personal_wechat" | "wecom";
-export type ClientKind = "employee-web" | "employee-miniapp";
+export type ClientKind = "employee-web" | "employee-miniapp" | "employee-wecom-miniapp";
 
 export type TaskStatus =
+  | "pending_dispatch"
   | "awaiting_confirmation"
   | "assigned"
   | "in_progress"
+  | "paused"
   | "completed"
   | "cancelled";
 
 export type CandidateStatus = "proposed" | "selected" | "rejected" | "invalidated";
 export type AssignmentStatus = "confirmed" | "accepted" | "completed" | "cancelled";
+export type AssignmentReceiptStatus = "pending" | "received";
 export type CommandStatus = "pending" | "syncing" | "confirmed" | "failed";
+export type ExceptionSeverity = "low" | "medium" | "high" | "critical";
+export type ExceptionStatus = "open" | "acknowledged" | "resolved" | "rejected";
 
 export interface ApiEnvelope<T> {
   data: T;
@@ -88,9 +93,11 @@ export interface CoreTaskAssignment {
   personnel_public_id: string;
   status: AssignmentStatus;
   status_version: number;
+  receipt_status: AssignmentReceiptStatus;
   confirmation_id: string;
   confirmed_by_public_id: string;
   confirmed_at: string;
+  received_at?: string;
 }
 
 export interface CoreTask {
@@ -126,6 +133,7 @@ export interface CorePersonnel {
   team_public_id: string;
   team_name?: string;
   position_code: string;
+  capability_code: string;
   capabilities: string[];
   work_state: string;
   status_version: number;
@@ -146,15 +154,121 @@ export interface CoreAssignment {
   team_public_id: string;
   status: AssignmentStatus;
   status_version: number;
+  receipt_status: AssignmentReceiptStatus;
   confirmation_id: string;
   confirmed_by_public_id: string;
   confirmed_at: string;
+  received_at?: string;
   accepted_at?: string;
   completed_at?: string;
   cancelled_at?: string;
   cancel_reason?: string;
   planned_at: string;
 }
+
+export interface CoreArea {
+  public_id: string;
+  code: string;
+  name: string;
+  enabled: boolean;
+}
+
+export interface CoreTeam {
+  public_id: string;
+  area_public_id: string;
+  area_name: string;
+  code: string;
+  name: string;
+  enabled: boolean;
+}
+
+export interface CoreTemplate {
+  public_id: string;
+  name: string;
+  trigger_type: string;
+  template_version: number;
+  enabled: boolean;
+  area_public_id: string;
+  team_public_id: string;
+  required_position_code: string;
+  required_capability_code: string;
+  required_capabilities: string[];
+  planned_offset_seconds: number;
+  default_message: string;
+}
+
+export interface CoreFlight {
+  public_id: string;
+  flight_display_no: string;
+  source_provider: string;
+  external_flight_id?: string;
+  operating_date: string;
+  scheduled_at: string;
+  source_last_synced_at?: string;
+  source_state: "fresh" | "stale" | "fallback" | "failed" | string;
+  source_last_attempt_at?: string;
+  source_last_error?: string;
+  actual_arrival_at?: string;
+  status: "scheduled" | "arrived" | "departed" | "cancelled" | string;
+  status_version: number;
+  last_status_changed_at: string;
+}
+
+export type TaskChangeAction = "pause" | "reassign" | "reschedule" | "cancel" | "resume";
+export type TaskChangeRequestStatus = "pending" | "approved" | "rejected" | "applied" | "failed";
+
+export interface CoreTaskChangeRequest {
+  public_id: string;
+  task_public_id: string;
+  exception_public_id?: string;
+  action: TaskChangeAction;
+  reason: string;
+  target_candidate_public_id?: string;
+  target_planned_at?: string;
+  status: TaskChangeRequestStatus;
+  requested_by_public_id: string;
+  requested_at: string;
+  reviewed_by_public_id?: string;
+  reviewed_at?: string;
+  review_note?: string;
+  applied_at?: string;
+  failure_reason?: string;
+  request_id: string;
+  trace_id: string;
+}
+
+export interface CoreTaskChangeRequestList {
+  items: CoreTaskChangeRequest[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface CoreAdminIdentity {
+  public_id: string;
+  provider: Provider | "oidc" | "development" | string;
+  external_subject: string;
+  display_name: string;
+  role: Exclude<Role, "staff"> | string;
+  enabled: boolean;
+  global_scope: boolean;
+  area_ids: number[];
+  team_ids: number[];
+  area_public_ids: string[];
+  team_public_ids: string[];
+  user_id: number;
+}
+
+export interface CoreAreaList { items: CoreArea[]; page: number; page_size: number; total: number; }
+export interface CoreTeamList { items: CoreTeam[]; page: number; page_size: number; total: number; }
+export interface CoreTemplateList { items: CoreTemplate[]; page: number; page_size: number; total: number; }
+export interface CoreFlightList { items: CoreFlight[]; page: number; page_size: number; total: number; }
+export interface CoreAdminIdentityList { items: CoreAdminIdentity[]; page: number; page_size: number; total: number; }
+
+export interface CorePosition { public_id: string; code: string; name: string; description: string; enabled: boolean; }
+export interface CoreCapability { public_id: string; code: string; name: string; description: string; enabled: boolean; }
+export interface CorePositionList { items: CorePosition[]; page: number; page_size: number; total: number; }
+export interface CoreCapabilityList { items: CoreCapability[]; page: number; page_size: number; total: number; }
 
 export interface CorePersonnelList {
   items: CorePersonnel[];
@@ -170,11 +284,139 @@ export interface CoreAssignmentList {
   total: number;
 }
 
+export interface CoreException {
+  public_id: string;
+  task_public_id: string;
+  flight_public_id: string;
+  flight_display_no: string;
+  assignment_public_id: string;
+  personnel_public_id: string;
+  personnel_name: string;
+  area_public_id: string;
+  team_public_id: string;
+  category: string;
+  severity: ExceptionSeverity | string;
+  description: string;
+  status: ExceptionStatus | string;
+  reported_by_public_id: string;
+  reported_at: string;
+  resolved_by_public_id?: string;
+  resolved_at?: string;
+  resolution_note?: string;
+}
+
+export interface CoreExceptionList {
+  items: CoreException[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface CoreReportOverview {
+  from?: string;
+  to?: string;
+  task_counts: Record<string, number>;
+  flight_counts: Record<string, number>;
+  assignment_counts: Record<string, number>;
+  personnel_counts: Record<string, number>;
+  exception_counts: Record<string, number>;
+}
+
+export interface CorePersonnelStatus {
+  public_id: string;
+  employee_no: string;
+  display_name: string;
+  area_public_id: string;
+  area_name: string;
+  team_public_id: string;
+  team_name: string;
+  position_code: string;
+  capability_code: string;
+  work_state: string;
+  status_version: number;
+  last_state_changed_at: string;
+  unavailable_reason?: string;
+  enabled: boolean;
+}
+export interface CorePersonnelStatusList { items: CorePersonnelStatus[]; page: number; page_size: number; total: number; }
+export interface CorePersonnelStatusHistory {
+  public_id: string;
+  personnel_public_id: string;
+  status_version: number;
+  from_state?: string;
+  to_state: string;
+  reason?: string;
+  actor_type: string;
+  actor_public_id?: string;
+  assignment_id?: number;
+  command_id?: string;
+  occurred_at: string;
+}
+export interface CorePersonnelStatusHistoryList { items: CorePersonnelStatusHistory[]; page: number; page_size: number; total: number; }
+export interface CoreEvent {
+  public_id: string;
+  event_type: string;
+  status: string;
+  aggregate_type: string;
+  aggregate_public_id: string;
+  flight_public_id?: string;
+  flight_display_no?: string;
+  source: string;
+  occurred_at: string;
+  last_error?: string;
+}
+export interface CoreEventList { items: CoreEvent[]; page: number; page_size: number; total: number; }
+export interface CoreAuditEntry {
+  id: number;
+  actor_type: string;
+  actor_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  result: string;
+  request_id: string;
+  trace_id: string;
+  source_ip: string;
+  occurred_at: string;
+}
+export interface CoreAuditList { items: CoreAuditEntry[]; page: number; page_size: number; total: number; }
+export interface CoreScopeView { principal_public_id: string; roles: string[]; global: boolean; area_ids: number[]; team_ids: number[]; }
+export interface CoreDiagnostics {
+  component: string;
+  generated_at: string;
+  database_reachable: boolean;
+  runtime: { environment: string; redis_enabled: boolean; flight_source_configured: boolean; real_identity_provider: boolean; development_actor_headers: boolean };
+  sync: { flight_source_pending: number; flight_source_retry: number; flight_source_failed: number; outbox_pending: number; outbox_failed: number; core_inbox_failed: number };
+}
+
 export interface CoreTaskList {
   items: CoreTask[];
   page: number;
   page_size: number;
   total: number;
+}
+
+export interface CoreTaskHistoryEvent {
+  public_id: string;
+  kind: "task" | "assignment" | "personnel" | string;
+  status_version: number;
+  from_status?: string;
+  to_status: string;
+  reason?: string;
+  actor_type: string;
+  actor_public_id?: string;
+  command_id?: string;
+  source_event_id?: string;
+  assignment_public_id?: string;
+  personnel_public_id?: string;
+  occurred_at: string;
+}
+
+export interface CoreTaskHistory {
+  task_public_id: string;
+  current_status: TaskStatus;
+  current_status_version: number;
+  events: CoreTaskHistoryEvent[];
 }
 
 export interface TaskConfirmationResult {
@@ -215,6 +457,8 @@ export interface EdgeTaskProjection {
   planned_at: string;
   status?: TaskStatus;
   business_status?: TaskStatus;
+  receipt_status?: AssignmentReceiptStatus;
+  received_at?: string;
   message: string;
   sync_version: number;
   updated_at: string;
@@ -232,6 +476,31 @@ export interface EdgeTaskList {
   reset_required: boolean;
   request_id: string;
   trace_id: string;
+}
+
+export interface EdgeNotification {
+  public_id: string;
+  employee_public_id: string;
+  title: string;
+  message: string;
+  status: "unread" | "read" | string;
+  sync_version: number;
+  updated_at: string;
+}
+
+export interface EdgeNotificationList {
+  items: EdgeNotification[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface EdgeHistoryList {
+  items: EdgeTaskProjection[];
+  page: number;
+  page_size: number;
+  total: number;
+  source: "edge_projection" | string;
 }
 
 export interface RealtimeTicket {
@@ -256,6 +525,20 @@ export interface EmployeeTaskCommandRequest {
   expected_sync_version: number;
   client_occurred_at?: string;
   note?: string;
+}
+
+export interface EmployeeExceptionReportRequest {
+  command_id: string;
+  assignment_public_id: string;
+  expected_sync_version: number;
+  category: string;
+  severity: ExceptionSeverity;
+  description: string;
+  client_occurred_at?: string;
+  /** Optional requested action; Core still requires manager/admin review before any mutation. */
+  change_action?: TaskChangeAction;
+  target_candidate_public_id?: string;
+  target_planned_at?: string;
 }
 
 export interface CommandAccepted {
@@ -286,7 +569,7 @@ export interface TaskListQuery {
 }
 
 export function isTaskStatus(value: string | undefined): value is TaskStatus {
-  return value === "awaiting_confirmation" || value === "assigned" || value === "in_progress" || value === "completed" || value === "cancelled";
+  return value === "pending_dispatch" || value === "awaiting_confirmation" || value === "assigned" || value === "in_progress" || value === "paused" || value === "completed" || value === "cancelled";
 }
 
 export function normalizeTaskStatus(value: string | undefined): TaskStatus {

@@ -34,7 +34,7 @@ func TestRecordFlightArrivedGeneratesTaskAndCandidatesAtomically(t *testing.T) {
 	if repository.flight.Status != flightmodule.StatusArrived || repository.flight.StatusVersion != 1 {
 		t.Fatalf("flight was not transitioned: %#v", repository.flight)
 	}
-	if len(repository.tasks) != 1 || repository.tasks[0].Status != taskmodule.StatusAwaitingConfirmation {
+	if len(repository.tasks) != 1 || repository.tasks[0].Status != taskmodule.StatusPendingDispatch {
 		t.Fatalf("unexpected tasks: %#v", repository.tasks)
 	}
 	if len(repository.candidates) != 1 || repository.candidates[0].PersonnelPublicID != "person-1" || repository.candidates[0].Rank != 1 {
@@ -142,8 +142,8 @@ func TestRecordArrivalHandlerReturnsStableEnvelope(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router, service)
 
-	body := `{"source_event_id":"http-source","occurred_at":"2026-08-31T08:00:00Z","actual_arrival_at":"2026-08-31T08:00:00Z","source":"manual"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/flights/flight-1/arrival", strings.NewReader(body))
+	body := `{"source_event_id":"http-source","occurred_at":"2026-08-31T08:00:00Z","actual_arrival_at":"2026-08-31T08:00:00Z","source":"flight-system"}`
+	request := httptest.NewRequest(http.MethodPost, "/internal/integration/v1/flights/flight-1/arrival", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
@@ -158,6 +158,20 @@ func TestRecordArrivalHandlerReturnsStableEnvelope(t *testing.T) {
 	}
 	if response.Data.ResultCode != ResultCreated || response.Data.TaskPublicID == "" {
 		t.Fatalf("unexpected handler response: %#v", response)
+	}
+}
+
+func TestRecordFlightArrivedRejectsManualOrMalformedProviderSource(t *testing.T) {
+	now := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
+	service := NewService(newFakeRepository(now), fixedClock{value: now})
+	for _, source := range []string{"manual", "Flight-System", "provider source"} {
+		t.Run(source, func(t *testing.T) {
+			input := arrivalInput(now, "source-"+source)
+			input.Source = source
+			if _, err := service.RecordFlightArrived(context.Background(), input); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("source %q returned %v, want invalid input", source, err)
+			}
+		})
 	}
 }
 

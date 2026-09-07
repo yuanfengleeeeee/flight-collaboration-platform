@@ -6,66 +6,66 @@ const taskSeed = [
     id: "task-001",
     time: "07:40",
     flight: "MU2156",
-    task: "客舱清洁",
-    team: "客舱保障组",
+    task: "国际航班值机准备",
+    team: "国际值机服务组",
     area: "T2 / A区",
     status: "awaiting",
     candidates: 4,
     owner: "待确认",
     note: "航班到达后触发",
-    description: "完成客舱清洁并反馈异常情况，重点检查前后舱和洗手间。",
+    description: "完成国际航班值机准备，复核证件查验和特殊文件提示。",
   },
   {
     id: "task-002",
     time: "08:15",
     flight: "CA1832",
-    task: "行李转运",
-    team: "行李运行组",
+    task: "到达行李地面派送",
+    team: "行李地面服务组",
     area: "T1 / B区",
     status: "assigned",
     candidates: 0,
     owner: "张三",
     note: "已分配 · 待员工接受",
-    description: "将到达行李转运至指定分拣线，异常行李需要在任务中备注。",
+    description: "完成到达行李地面派送，记录异常行李并反馈处理进度。",
   },
   {
     id: "task-003",
     time: "09:05",
     flight: "ZH9210",
-    task: "机坪引导",
-    team: "机坪保障组",
+    task: "航班地面保障协调",
+    team: "航班地面保障组",
     area: "T2 / C区",
     status: "in-progress",
     candidates: 0,
     owner: "李四",
     note: "执行中 · 已接受 08:54",
-    description: "按照机位指引完成靠桥前机坪引导，关注周边作业安全距离。",
+    description: "完成航班地面保障协调，确认机位、登机口和保障节点。",
   },
   {
     id: "task-004",
     time: "10:30",
     flight: "HO1188",
-    task: "餐食补给",
-    team: "客舱保障组",
+    task: "特殊旅客服务确认",
+    team: "特殊旅客服务组",
     area: "T2 / D区",
     status: "completed",
     candidates: 0,
     owner: "王五",
     note: "已完成 · 10:12",
-    description: "完成餐食车接驳和数量核对，异常项已记录。",
+    description: "确认特殊旅客服务需求，安排陪同、轮椅或无陪儿童服务。",
   },
   {
     id: "task-005",
     time: "11:20",
     flight: "FM9450",
-    task: "航后检查",
-    team: "机务保障组",
+    task: "不正常航班旅客服务",
+    team: "不正常航班服务组",
     area: "T2 / A区",
     status: "cancelled",
     candidates: 0,
     owner: "—",
     note: "已取消 · 航班调整",
-    description: "因航班计划调整，当前任务已取消。",
+    description: "因航班计划调整，当前旅客服务任务已取消。",
   },
 ];
 
@@ -79,7 +79,7 @@ const statusMeta = {
 
 const roleMeta = {
   manager: { label: "主任", scope: "全部团队 · 全部区域", initials: "主" },
-  leader: { label: "队长", scope: "客舱保障组 · T2", initials: "队" },
+  leader: { label: "队长", scope: "国际值机服务组 · T2", initials: "队" },
   admin: { label: "系统管理员", scope: "系统全局", initials: "管" },
 };
 
@@ -152,7 +152,7 @@ function effectiveTaskStatus(task) {
 
 function taskVisibleForAdmin(task) {
   if (state.adminRole !== "leader") return true;
-  return task.team === "客舱保障组" && task.area.startsWith("T2");
+  return task.team === "国际值机服务组" && task.area.startsWith("T2");
 }
 
 function getSelectedTask() {
@@ -177,7 +177,7 @@ function renderAdminSidebar() {
     return `<button class="nav-link ${state.adminSection === key ? "is-active" : ""} ${restricted ? "is-restricted" : ""}" data-action="admin-section" data-section="${key}" ${restricted ? `title="${label}仅限主任或系统管理员" disabled` : ""}><span class="nav-icon">${icon}</span><span>${label}</span>${restricted ? `<small>需授权</small>` : ""}</button>`;
   }).join("")}</div>`).join("");
 
-  return `<aside class="admin-sidebar"><div class="brand-lockup"><span class="brand-mark">A</span><strong>航班保障协同</strong><small>OPERATIONS / CONTROL</small></div><nav class="admin-nav" aria-label="管理端工作区">${nav}</nav><div class="scope-card"><span>当前可见范围</span><strong>${role.scope}</strong><small>由 Core Scope 控制 · ${role.label}视图</small></div><div class="sidebar-footer"><div class="operator"><span class="avatar">${role.initials}</span><span>${role.label}<br /><small>${state.adminRole === "leader" ? "Leader · T2" : state.adminRole === "admin" ? "System · Global" : "Manager · Global"}</small></span></div><button class="role-preview" data-action="toggle-admin-role">Mock：切换为${state.adminRole === "leader" ? "主任" : "队长"}视图</button></div></aside>`;
+  return `<aside class="admin-sidebar"><div class="brand-lockup"><span class="brand-mark">A</span><strong>航空客运地面代理协同</strong><small>OPERATIONS / CONTROL</small></div><nav class="admin-nav" aria-label="管理端工作区">${nav}</nav><div class="scope-card"><span>当前可见范围</span><strong>${role.scope}</strong><small>由 Core Scope 控制 · ${role.label}视图</small></div><div class="sidebar-footer"><div class="operator"><span class="avatar">${role.initials}</span><span>${role.label}<br /><small>${state.adminRole === "leader" ? "Leader · T2" : state.adminRole === "admin" ? "System · Global" : "Manager · Global"}</small></span></div><button class="role-preview" data-action="toggle-admin-role">Mock：切换为${state.adminRole === "leader" ? "主任" : "队长"}视图</button></div></aside>`;
 }
 
 function adminMetric(label, value, tone = "") {
@@ -188,7 +188,7 @@ function renderAdminList() {
   const visibleTasks = taskSeed.filter((task) => taskVisibleForAdmin(task)).filter((task) => state.adminFilter === "all" || effectiveTaskStatus(task) === state.adminFilter);
   const role = roleMeta[state.adminRole];
 
-  return `<div class="admin-shell">${renderAdminSidebar()}<section class="admin-content"><div class="content-topline"><div class="breadcrumb">运行管理台 <span>/</span> <strong>任务工作台</strong></div><div class="topline-actions"><span class="sync-pill">Core 已同步 07:42</span><button class="text-button" data-action="refresh">刷新</button></div></div><div class="page-heading"><div><span class="eyebrow">SHIFT / 09.01 · ${role.scope}</span><h1>任务工作台</h1><p>${state.adminRole === "leader" ? "只显示当前队长所属团队与区域的任务。" : "主任视图：查看所有队长、团队、区域和任务状态。"}</p></div><div class="live-indicator"><strong>运行状态正常</strong><small>最后读取 07:42:18 · ${role.label}视图</small></div></div><div class="metric-grid">${adminMetric("待确认", state.adminRole === "leader" ? "04" : "12", "")}${adminMetric("已分配", state.adminRole === "leader" ? "03" : "08", "blue")}${adminMetric("执行中", state.adminRole === "leader" ? "01" : "04", "blue")}${adminMetric("今日已完成", state.adminRole === "leader" ? "11" : "36", "teal")}</div><section class="workbench-card"><div class="scope-banner"><div><span class="section-kicker">SCOPE FILTER</span><strong>${role.label} · ${role.scope}</strong></div><span>${state.adminRole === "leader" ? "团队/区域自动授权" : "全局可见"}</span></div><div class="toolbar-row"><div class="toolbar-group"><label class="input-wrap"><span>⌕</span><input aria-label="搜索航班或任务" placeholder="搜索航班或任务" /></label><select class="select-control" aria-label="选择团队"><option>${state.adminRole === "leader" ? "客舱保障组" : "全部团队"}</option><option>行李运行组</option><option>机坪保障组</option></select><select class="select-control" aria-label="选择区域"><option>${state.adminRole === "leader" ? "T2" : "全部区域"}</option><option>T1</option><option>T2</option></select><select class="select-control" aria-label="选择队长" ${state.adminRole === "leader" ? "disabled" : ""}><option>${state.adminRole === "leader" ? "当前队长" : "全部队长"}</option><option>李队长</option><option>王队长</option></select></div><button class="secondary-button" data-action="open-auth">查看登录流程</button></div><div class="filter-tabs" role="tablist" aria-label="任务状态筛选">${renderFilterButton("all", "全部任务")}${renderFilterButton("awaiting", "待确认")}${renderFilterButton("assigned", "已分配")}${renderFilterButton("in-progress", "执行中")}${renderFilterButton("completed", "已完成")}</div><div class="table-scroll"><table class="task-table"><thead><tr><th>计划时间</th><th>航班 / 任务</th><th>团队</th><th>区域</th><th>状态</th><th>队长 / 执行人</th><th></th></tr></thead><tbody>${visibleTasks.map(renderAdminTaskRow).join("") || renderEmptyAdminRow()}</tbody></table></div><div class="list-footer"><span>显示 ${visibleTasks.length} 条当前 Scope 任务</span><span>Projection lag &lt; 30s</span></div></section></section></div>`;
+  return `<div class="admin-shell">${renderAdminSidebar()}<section class="admin-content"><div class="content-topline"><div class="breadcrumb">运行管理台 <span>/</span> <strong>任务工作台</strong></div><div class="topline-actions"><span class="sync-pill">Core 已同步 07:42</span><button class="text-button" data-action="refresh">刷新</button></div></div><div class="page-heading"><div><span class="eyebrow">SHIFT / 09.01 · ${role.scope}</span><h1>任务工作台</h1><p>${state.adminRole === "leader" ? "只显示当前队长所属团队与区域的任务。" : "主任视图：查看所有队长、团队、区域和任务状态。"}</p></div><div class="live-indicator"><strong>运行状态正常</strong><small>最后读取 07:42:18 · ${role.label}视图</small></div></div><div class="metric-grid">${adminMetric("待确认", state.adminRole === "leader" ? "04" : "12", "")}${adminMetric("已分配", state.adminRole === "leader" ? "03" : "08", "blue")}${adminMetric("执行中", state.adminRole === "leader" ? "01" : "04", "blue")}${adminMetric("今日已完成", state.adminRole === "leader" ? "11" : "36", "teal")}</div><section class="workbench-card"><div class="scope-banner"><div><span class="section-kicker">SCOPE FILTER</span><strong>${role.label} · ${role.scope}</strong></div><span>${state.adminRole === "leader" ? "团队/区域自动授权" : "全局可见"}</span></div><div class="toolbar-row"><div class="toolbar-group"><label class="input-wrap"><span>⌕</span><input aria-label="搜索航班或任务" placeholder="搜索航班或任务" /></label><select class="select-control" aria-label="选择团队"><option>${state.adminRole === "leader" ? "国际值机服务组" : "全部团队"}</option><option>值机服务组</option><option>行李地面服务组</option><option>航班地面保障组</option></select><select class="select-control" aria-label="选择区域"><option>${state.adminRole === "leader" ? "T2" : "全部区域"}</option><option>T1</option><option>T2</option></select><select class="select-control" aria-label="选择队长" ${state.adminRole === "leader" ? "disabled" : ""}><option>${state.adminRole === "leader" ? "当前队长" : "全部队长"}</option><option>李队长</option><option>王队长</option></select></div><button class="secondary-button" data-action="open-auth">查看登录流程</button></div><div class="filter-tabs" role="tablist" aria-label="任务状态筛选">${renderFilterButton("all", "全部任务")}${renderFilterButton("awaiting", "待确认")}${renderFilterButton("assigned", "已分配")}${renderFilterButton("in-progress", "执行中")}${renderFilterButton("completed", "已完成")}</div><div class="table-scroll"><table class="task-table"><thead><tr><th>计划时间</th><th>航班 / 任务</th><th>团队</th><th>区域</th><th>状态</th><th>队长 / 执行人</th><th></th></tr></thead><tbody>${visibleTasks.map(renderAdminTaskRow).join("") || renderEmptyAdminRow()}</tbody></table></div><div class="list-footer"><span>显示 ${visibleTasks.length} 条当前 Scope 任务</span><span>Projection lag &lt; 30s</span></div></section></section></div>`;
 }
 
 function renderFilterButton(filter, label) {
@@ -211,11 +211,11 @@ function renderAdminDetail() {
   const task = getSelectedTask();
   const status = task.status;
   const canConfirm = status === "awaiting" && taskVisibleForAdmin(task);
-  return `<div class="admin-shell">${renderAdminSidebar()}<section class="admin-content"><div class="content-topline"><button class="back-button" data-action="admin-list">← 返回任务工作台</button><div class="topline-actions"><span class="sync-pill">Core 已同步 07:42</span><button class="text-button" data-action="refresh">刷新详情</button></div></div><div class="detail-layout"><div class="detail-main"><article class="detail-card"><div class="detail-heading"><div><span class="eyebrow">FLIGHT STRIP / ${task.flight}</span><h1>${task.task}</h1><p>${task.team} · ${task.area} · 管辖队长：${task.team === "客舱保障组" ? "李队长" : "王队长"}</p></div>${statusBadge(status)}</div><div class="detail-facts"><div class="fact"><span>计划开始</span><strong class="data-number">${task.time}</strong></div><div class="fact"><span>触发来源</span><strong>航班到达</strong></div><div class="fact"><span>当前执行人</span><strong>${task.owner}</strong></div><div class="fact"><span>Task 版本</span><strong class="data-number">v12</strong></div></div></article>${canConfirm ? renderCandidateCard(task) : renderAssignmentCard(task)}${renderTimeline(task)}</div><aside class="detail-side"><div class="side-card"><span class="section-kicker">NEXT DECISION</span><h2>${canConfirm ? "确认一名候选人" : "任务状态"}</h2><p>${canConfirm ? "确认后将创建 Assignment，并把任务发送到员工端。队长只能操作当前 Scope 内任务。" : "所有最终状态来自 Core 事实源，当前页面只做展示。"}</p>${canConfirm ? `<button class="primary-button" data-action="confirm-task">确认分配</button><button class="secondary-button" data-action="cancel-task">取消任务</button>` : `<button class="secondary-button" data-action="admin-list">返回任务工作台</button>`}</div><div class="diagnostic-card"><span class="section-kicker">ACCESS CONTEXT</span><code>role: ${state.adminRole}</code><code>scope: ${roleMeta[state.adminRole].scope}</code><code>request_id: req_mock_8f42</code><code>expected_version: 12</code></div></aside></div></section></div>`;
+  return `<div class="admin-shell">${renderAdminSidebar()}<section class="admin-content"><div class="content-topline"><button class="back-button" data-action="admin-list">← 返回任务工作台</button><div class="topline-actions"><span class="sync-pill">Core 已同步 07:42</span><button class="text-button" data-action="refresh">刷新详情</button></div></div><div class="detail-layout"><div class="detail-main"><article class="detail-card"><div class="detail-heading"><div><span class="eyebrow">FLIGHT STRIP / ${task.flight}</span><h1>${task.task}</h1><p>${task.team} · ${task.area} · 管辖队长：${task.team === "国际值机服务组" ? "李队长" : "王队长"}</p></div>${statusBadge(status)}</div><div class="detail-facts"><div class="fact"><span>计划开始</span><strong class="data-number">${task.time}</strong></div><div class="fact"><span>触发来源</span><strong>航班到达</strong></div><div class="fact"><span>当前执行人</span><strong>${task.owner}</strong></div><div class="fact"><span>Task 版本</span><strong class="data-number">v12</strong></div></div></article>${canConfirm ? renderCandidateCard(task) : renderAssignmentCard(task)}${renderTimeline(task)}</div><aside class="detail-side"><div class="side-card"><span class="section-kicker">NEXT DECISION</span><h2>${canConfirm ? "确认一名候选人" : "任务状态"}</h2><p>${canConfirm ? "确认后将创建 Assignment，并把任务发送到员工端。队长只能操作当前 Scope 内任务。" : "所有最终状态来自 Core 事实源，当前页面只做展示。"}</p>${canConfirm ? `<button class="primary-button" data-action="confirm-task">确认分配</button><button class="secondary-button" data-action="cancel-task">取消任务</button>` : `<button class="secondary-button" data-action="admin-list">返回任务工作台</button>`}</div><div class="diagnostic-card"><span class="section-kicker">ACCESS CONTEXT</span><code>role: ${state.adminRole}</code><code>scope: ${roleMeta[state.adminRole].scope}</code><code>request_id: req_mock_8f42</code><code>expected_version: 12</code></div></aside></div></section></div>`;
 }
 
 function renderCandidateCard(task) {
-  const candidates = [["张三", "客舱岗位", "07:30 可用"], ["李四", "客舱岗位", "07:35 可用"], ["王五", "客舱岗位", "07:38 可用"]];
+  const candidates = [["张三", "值机服务岗位", "07:30 可用"], ["李四", "值机服务岗位", "07:35 可用"], ["王五", "值机服务岗位", "07:38 可用"]];
   return `<section class="candidate-card"><div class="section-title"><h2>推荐人员（${task.candidates}）</h2><p>按资格与计划时间排序</p></div><div class="candidate-list">${candidates.map(([name, role, time]) => `<div class="candidate-row"><span class="candidate-radio">○</span><strong>${name}</strong><small>${role}</small><span class="mini-chip">能力匹配</span><small>${time}</small><button class="secondary-button small-button">选择</button></div>`).join("")}</div></section>`;
 }
 

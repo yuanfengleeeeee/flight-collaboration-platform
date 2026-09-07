@@ -1,9 +1,11 @@
-import type { CommandStatus, EdgeTaskProjection, TaskStatus } from "@flight/contracts";
+import type { AssignmentReceiptStatus, CommandStatus, EdgeTaskProjection, TaskChangeAction, TaskStatus } from "@flight/contracts";
 
 export const taskStatusLabel: Record<TaskStatus, string> = {
+  pending_dispatch: "待自动派发",
   awaiting_confirmation: "待确认",
   assigned: "已分配",
   in_progress: "执行中",
+  paused: "已暂停",
   completed: "已完成",
   cancelled: "已取消",
 };
@@ -19,9 +21,16 @@ export function projectionStatus(projection: EdgeTaskProjection): TaskStatus {
   return projection.business_status ?? projection.status ?? "awaiting_confirmation";
 }
 
-export function canAccept(status: TaskStatus): boolean { return status === "assigned"; }
+export function canReceive(status: TaskStatus, receiptStatus: AssignmentReceiptStatus = "pending"): boolean { return status === "assigned" && receiptStatus !== "received"; }
+export function canStart(status: TaskStatus, receiptStatus: AssignmentReceiptStatus = "pending"): boolean { return status === "assigned" && receiptStatus === "received"; }
 export function canComplete(status: TaskStatus): boolean { return status === "in_progress"; }
 export function isTerminal(status: TaskStatus): boolean { return status === "completed" || status === "cancelled"; }
+
+export function suggestedChangeActionForExceptionCategory(category: string): TaskChangeAction | undefined {
+  if (category.includes("保障冲突")) return "reassign";
+  if (category.includes("航班取消")) return "cancel";
+  return undefined;
+}
 
 export function createClientID(): string {
   const cryptoValue = globalThis.crypto?.randomUUID?.();

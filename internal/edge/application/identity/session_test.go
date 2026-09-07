@@ -97,6 +97,23 @@ func TestBindingRequiredDoesNotIssueSession(t *testing.T) {
 	}
 }
 
+func TestWeComMiniappPasswordLoginIssuesEmployeeSession(t *testing.T) {
+	client := testCoreClient{passwordResult: sharedIdentity.PasswordVerifyResult{
+		State: "authenticated", Staff: sharedIdentity.Staff{PublicID: "staff-1", EmployeeNo: "E001", Role: "staff"},
+	}}
+	service := NewService(client, NewMemorySessionStore(), testIssuer{}, fixedClock{value: time.Unix(100, 0)}, Config{})
+
+	result, err := service.PasswordLogin(context.Background(), sharedIdentity.PasswordVerifyRequest{
+		EmployeeNo: "E001", Password: "correct", Client: "employee-wecom-miniapp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "authenticated" || result.AccessToken == "" || result.RefreshToken == "" {
+		t.Fatalf("unexpected WeCom miniapp session response: %#v", result)
+	}
+}
+
 func TestLogoutRevokesCurrentSession(t *testing.T) {
 	service := NewService(testCoreClient{passwordResult: sharedIdentity.PasswordVerifyResult{State: "authenticated", Staff: sharedIdentity.Staff{PublicID: "staff-1"}}}, NewMemorySessionStore(), testIssuer{}, fixedClock{value: time.Unix(100, 0)}, Config{})
 	login, err := service.PasswordLogin(context.Background(), sharedIdentity.PasswordVerifyRequest{EmployeeNo: "E001", Password: "correct", Client: "employee-web"})

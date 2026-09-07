@@ -331,7 +331,7 @@ func (s *SQLStore) upsertTaskProjection(ctx context.Context, db *gorm.DB, projec
 			return nil
 		}
 	}
-	row := taskProjectionRow{PublicID: projection.PublicID, AssignmentPublicID: projection.AssignmentPublicID, EmployeePublicID: projection.EmployeePublicID, FlightDisplayNo: projection.FlightDisplayNo, TaskName: projection.TaskName, AreaName: projection.AreaName, PlannedAt: projection.PlannedAt.UTC(), Status: projection.Status, Message: projection.Message, SyncVersion: projection.SyncVersion, UpdatedAt: projection.UpdatedAt.UTC()}
+	row := taskProjectionRow{PublicID: projection.PublicID, AssignmentPublicID: projection.AssignmentPublicID, EmployeePublicID: projection.EmployeePublicID, FlightDisplayNo: projection.FlightDisplayNo, TaskName: projection.TaskName, AreaName: projection.AreaName, PlannedAt: projection.PlannedAt.UTC(), Status: projection.Status, ReceiptStatus: projection.ReceiptStatus, ReceivedAt: projection.ReceivedAt, Message: projection.Message, SyncVersion: projection.SyncVersion, UpdatedAt: projection.UpdatedAt.UTC()}
 	if row.UpdatedAt.IsZero() {
 		row.UpdatedAt = time.Now().UTC()
 	}
@@ -344,7 +344,7 @@ func (s *SQLStore) upsertTaskProjection(ctx context.Context, db *gorm.DB, projec
 	if findErr != nil {
 		return findErr
 	}
-	if err := db.Model(&taskProjectionRow{}).Where("public_id = ?", projection.PublicID).Updates(map[string]any{"assignment_public_id": row.AssignmentPublicID, "employee_public_id": row.EmployeePublicID, "flight_display_no": row.FlightDisplayNo, "task_name": row.TaskName, "area_name": row.AreaName, "planned_at": row.PlannedAt, "status": row.Status, "message": row.Message, "sync_version": row.SyncVersion, "updated_at": row.UpdatedAt}).Error; err != nil {
+	if err := db.Model(&taskProjectionRow{}).Where("public_id = ?", projection.PublicID).Updates(map[string]any{"assignment_public_id": row.AssignmentPublicID, "employee_public_id": row.EmployeePublicID, "flight_display_no": row.FlightDisplayNo, "task_name": row.TaskName, "area_name": row.AreaName, "planned_at": row.PlannedAt, "status": row.Status, "receipt_status": row.ReceiptStatus, "received_at": row.ReceivedAt, "message": row.Message, "sync_version": row.SyncVersion, "updated_at": row.UpdatedAt}).Error; err != nil {
 		return err
 	}
 	if err := s.bumpProjectionRevision(db, projection.EmployeePublicID); err != nil {
@@ -373,6 +373,113 @@ func (s *SQLStore) ListTaskProjections(ctx context.Context, employeePublicID str
 		values = append(values, row.projection())
 	}
 	return values, nil
+}
+
+func (s *SQLStore) ListTaskHistory(ctx context.Context, filter TaskHistoryFilter) ([]TaskProjection, int64, error) {
+	if s == nil || s.db == nil {
+		return nil, 0, fmt.Errorf("edge sql store is not configured")
+	}
+	page, pageSize := normalizeNotificationPagination(filter.Page, filter.PageSize)
+	query := s.db.WithContext(ctx).Model(&taskProjectionRow{})
+	if filter.EmployeePublicID != "" {
+		query = query.Where("employee_public_id = ?", filter.EmployeePublicID)
+	}
+	terminalStatuses := []string{"completed", "cancelled"}
+	if filter.Status != "" && filter.Status != "all" {
+		terminalStatuses = []string{filter.Status}
+	}
+	query = query.Where("status IN ?", terminalStatuses)
+	var total int64
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count edge task history: %w", err)
+	}
+	var rows []taskProjectionRow
+	if err := query.Order("updated_at DESC, public_id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("list edge task history: %w", err)
+	}
+	values := make([]TaskProjection, 0, len(rows))
+	for _, row := range rows {
+		values = append(values, row.projection())
+	}
+	return values, total, nil
+}
+
+func (s *SQLStore) ListNotifications(ctx context.Context, filter NotificationFilter) ([]NotificationProjection, int64, error) {
+	if s == nil || s.db == nil {
+		return nil, 0, fmt.Errorf("edge sql store is not configured")
+	}
+	page, pageSize := normalizeNotificationPagination(filter.Page, filter.PageSize)
+	query := s.db.WithContext(ctx).Model(&notificationProjectionRow{})
+	if filter.EmployeePublicID != "" {
+		query = query.Where("employee_public_id = ?", filter.EmployeePublicID)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	var total int64
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count edge notifications: %w", err)
+	}
+	var rows []notificationProjectionRow
+	if err := query.Order("updated_at DESC, public_id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("list edge notifications: %w", err)
+	}
+	values := make([]NotificationProjection, 0, len(rows))
+	for _, row := range rows {
+		values = append(values, row.notification())
+	}
+	return values, total, nil
+}
+
+func (s *SQLStore) UpsertNotificationProjection(ctx context.Context, notification NotificationProjection) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("edge sql store is not configured")
+	}
+	if notification.PublicID == "" || notification.EmployeePublicID == "" || notification.SyncVersion == 0 {
+		return fmt.Errorf("notification public_id, employee_public_id and sync_version are required")
+	}
+	if notification.UpdatedAt.IsZero() {
+		notification.UpdatedAt = time.Now().UTC()
+	}
+	db := s.db.WithContext(ctx)
+	if tx, ok := ctx.Value(transactionContextKey{}).(*gorm.DB); ok {
+		db = tx.WithContext(ctx)
+	}
+	var existing notificationProjectionRow
+	findErr := db.Where("public_id = ?", notification.PublicID).First(&existing).Error
+	if findErr == nil {
+		if existing.SyncVersion >= notification.SyncVersion {
+			return nil
+		}
+		return db.Model(&notificationProjectionRow{}).Where("public_id = ?", notification.PublicID).Updates(map[string]any{"employee_public_id": notification.EmployeePublicID, "title": notification.Title, "message": notification.Message, "status": notification.Status, "sync_version": notification.SyncVersion, "updated_at": notification.UpdatedAt.UTC()}).Error
+	}
+	if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("find edge notification projection: %w", findErr)
+	}
+	if err := db.Create(&notificationProjectionRow{PublicID: notification.PublicID, EmployeePublicID: notification.EmployeePublicID, Title: notification.Title, Message: notification.Message, Status: notification.Status, SyncVersion: notification.SyncVersion, UpdatedAt: notification.UpdatedAt.UTC()}).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+		return fmt.Errorf("create edge notification projection: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLStore) MarkNotificationRead(ctx context.Context, employeePublicID, publicID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("edge sql store is not configured")
+	}
+	var row notificationProjectionRow
+	if err := s.db.WithContext(ctx).Where("public_id = ? AND employee_public_id = ?", publicID, employeePublicID).First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("find edge notification: %w", err)
+	}
+	if row.Status == "read" {
+		return nil
+	}
+	if err := s.db.WithContext(ctx).Model(&notificationProjectionRow{}).Where("public_id = ? AND employee_public_id = ?", publicID, employeePublicID).Updates(map[string]any{"status": "read", "updated_at": time.Now().UTC()}).Error; err != nil {
+		return fmt.Errorf("mark edge notification read: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLStore) ListTaskSnapshot(ctx context.Context, employeePublicID string, now time.Time) (TaskSnapshot, error) {
@@ -485,18 +592,31 @@ func newSyncInboxRow(envelope sharedEvent.EventEnvelope) syncInboxRow {
 }
 
 type taskProjectionRow struct {
-	ID                 uint64    `gorm:"column:id;primaryKey;autoIncrement"`
-	PublicID           string    `gorm:"column:public_id"`
-	AssignmentPublicID string    `gorm:"column:assignment_public_id"`
-	EmployeePublicID   string    `gorm:"column:employee_public_id"`
-	FlightDisplayNo    string    `gorm:"column:flight_display_no"`
-	TaskName           string    `gorm:"column:task_name"`
-	AreaName           string    `gorm:"column:area_name"`
-	PlannedAt          time.Time `gorm:"column:planned_at"`
-	Status             string    `gorm:"column:status"`
-	Message            string    `gorm:"column:message"`
-	SyncVersion        uint64    `gorm:"column:sync_version"`
-	UpdatedAt          time.Time `gorm:"column:updated_at"`
+	ID                 uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	PublicID           string     `gorm:"column:public_id"`
+	AssignmentPublicID string     `gorm:"column:assignment_public_id"`
+	EmployeePublicID   string     `gorm:"column:employee_public_id"`
+	FlightDisplayNo    string     `gorm:"column:flight_display_no"`
+	TaskName           string     `gorm:"column:task_name"`
+	AreaName           string     `gorm:"column:area_name"`
+	PlannedAt          time.Time  `gorm:"column:planned_at"`
+	Status             string     `gorm:"column:status"`
+	ReceiptStatus      string     `gorm:"column:receipt_status"`
+	ReceivedAt         *time.Time `gorm:"column:received_at"`
+	Message            string     `gorm:"column:message"`
+	SyncVersion        uint64     `gorm:"column:sync_version"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at"`
+}
+
+type notificationProjectionRow struct {
+	ID               uint64    `gorm:"column:id;primaryKey;autoIncrement"`
+	PublicID         string    `gorm:"column:public_id"`
+	EmployeePublicID string    `gorm:"column:employee_public_id"`
+	Title            string    `gorm:"column:title"`
+	Message          string    `gorm:"column:message"`
+	Status           string    `gorm:"column:status"`
+	SyncVersion      uint64    `gorm:"column:sync_version"`
+	UpdatedAt        time.Time `gorm:"column:updated_at"`
 }
 
 type employeeProjectionCursorRow struct {
@@ -509,8 +629,14 @@ func (employeeProjectionCursorRow) TableName() string { return "employee_project
 
 func (taskProjectionRow) TableName() string { return "task_projection" }
 
+func (notificationProjectionRow) TableName() string { return "notification_projection" }
+
 func (row taskProjectionRow) projection() TaskProjection {
-	return TaskProjection{PublicID: row.PublicID, AssignmentPublicID: row.AssignmentPublicID, EmployeePublicID: row.EmployeePublicID, FlightDisplayNo: row.FlightDisplayNo, TaskName: row.TaskName, AreaName: row.AreaName, PlannedAt: row.PlannedAt.UTC(), Status: row.Status, BusinessStatus: row.Status, Message: row.Message, SyncVersion: row.SyncVersion, UpdatedAt: row.UpdatedAt.UTC()}
+	return TaskProjection{PublicID: row.PublicID, AssignmentPublicID: row.AssignmentPublicID, EmployeePublicID: row.EmployeePublicID, FlightDisplayNo: row.FlightDisplayNo, TaskName: row.TaskName, AreaName: row.AreaName, PlannedAt: row.PlannedAt.UTC(), Status: row.Status, BusinessStatus: row.Status, ReceiptStatus: row.ReceiptStatus, ReceivedAt: row.ReceivedAt, Message: row.Message, SyncVersion: row.SyncVersion, UpdatedAt: row.UpdatedAt.UTC()}
+}
+
+func (row notificationProjectionRow) notification() NotificationProjection {
+	return NotificationProjection{PublicID: row.PublicID, EmployeePublicID: row.EmployeePublicID, Title: row.Title, Message: row.Message, Status: row.Status, SyncVersion: row.SyncVersion, UpdatedAt: row.UpdatedAt.UTC()}
 }
 
 type mobileCommandRow struct {

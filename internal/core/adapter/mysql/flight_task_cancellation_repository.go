@@ -31,7 +31,7 @@ func (tx *transaction) FindActiveAssignmentForUpdate(ctx context.Context, taskID
 	err := tx.db.WithContext(ctx).
 		Table("task_assignment AS a").
 		Select(`a.id, a.public_id, a.task_id, a.candidate_id, a.personnel_id, a.status, a.status_version,
-			a.confirmation_id, a.confirmed_by_public_id, a.confirmed_at, p.public_id AS personnel_public_id`).
+			a.receipt_status, a.received_at, a.confirmation_id, a.confirmed_by_public_id, a.confirmed_at, p.public_id AS personnel_public_id`).
 		Joins("JOIN personnel AS p ON p.id = a.personnel_id").
 		Where("a.task_id = ? AND a.status IN ?", taskID, []string{string(taskmodule.AssignmentConfirmed), string(taskmodule.AssignmentAccepted)}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).

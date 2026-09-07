@@ -10,11 +10,38 @@ const TriggerFlightArrived TriggerType = "flight_arrived"
 type Status string
 
 const (
+	// StatusPendingDispatch means the flight event has generated a task and
+	// candidates, but the automatic selector has not yet committed an
+	// assignment. It is intentionally distinct from human confirmation.
+	StatusPendingDispatch      Status = "pending_dispatch"
 	StatusAwaitingConfirmation Status = "awaiting_confirmation"
 	StatusAssigned             Status = "assigned"
 	StatusInProgress           Status = "in_progress"
-	StatusCompleted            Status = "completed"
-	StatusCancelled            Status = "cancelled"
+	// StatusPaused means a manager-approved operational change has temporarily
+	// removed the task from execution. It is not an employee refusal state.
+	StatusPaused    Status = "paused"
+	StatusCompleted Status = "completed"
+	StatusCancelled Status = "cancelled"
+)
+
+type ChangeAction string
+
+const (
+	ChangeActionPause      ChangeAction = "pause"
+	ChangeActionReassign   ChangeAction = "reassign"
+	ChangeActionReschedule ChangeAction = "reschedule"
+	ChangeActionCancel     ChangeAction = "cancel"
+	ChangeActionResume     ChangeAction = "resume"
+)
+
+type ChangeRequestStatus string
+
+const (
+	ChangeRequestPending  ChangeRequestStatus = "pending"
+	ChangeRequestApproved ChangeRequestStatus = "approved"
+	ChangeRequestRejected ChangeRequestStatus = "rejected"
+	ChangeRequestApplied  ChangeRequestStatus = "applied"
+	ChangeRequestFailed   ChangeRequestStatus = "failed"
 )
 
 type CandidateStatus string
@@ -66,6 +93,29 @@ type Instance struct {
 	SyncVersion          uint64
 }
 
+type ChangeRequest struct {
+	ID                      uint64
+	PublicID                string
+	TaskID                  uint64
+	TaskPublicID            string
+	ExceptionID             uint64
+	ExceptionPublicID       string
+	Action                  ChangeAction
+	Reason                  string
+	TargetCandidatePublicID string
+	TargetPlannedAt         *time.Time
+	Status                  ChangeRequestStatus
+	RequestedByPublicID     string
+	RequestedAt             time.Time
+	ReviewedByPublicID      string
+	ReviewedAt              *time.Time
+	ReviewNote              string
+	AppliedAt               *time.Time
+	FailureReason           string
+	RequestID               string
+	TraceID                 string
+}
+
 type StatusHistory struct {
 	PublicID      string
 	TaskID        uint64
@@ -106,6 +156,13 @@ const (
 	AssignmentCancelled AssignmentStatus = "cancelled"
 )
 
+type AssignmentReceiptStatus string
+
+const (
+	AssignmentReceiptPending  AssignmentReceiptStatus = "pending"
+	AssignmentReceiptReceived AssignmentReceiptStatus = "received"
+)
+
 type Assignment struct {
 	ID                  uint64
 	PublicID            string
@@ -115,6 +172,8 @@ type Assignment struct {
 	PersonnelPublicID   string
 	Status              AssignmentStatus
 	StatusVersion       uint64
+	ReceiptStatus       AssignmentReceiptStatus
+	ReceivedAt          *time.Time
 	ConfirmationID      string
 	ConfirmedByPublicID string
 	ConfirmedAt         time.Time

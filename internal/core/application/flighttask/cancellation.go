@@ -167,7 +167,7 @@ func (s *CancellationService) CancelTask(ctx context.Context, input Cancellation
 		case taskmodule.StatusCompleted:
 			result = cancellationResultForTask(ResultTaskAlreadyCompleted, task, normalized.Reason)
 			return s.persistCancellationOutcomeAndAudit(ctx, tx, normalized, requestHash, result, idempotencySucceeded, nil, now)
-		case taskmodule.StatusAwaitingConfirmation, taskmodule.StatusAssigned, taskmodule.StatusInProgress:
+		case taskmodule.StatusPendingDispatch, taskmodule.StatusAwaitingConfirmation, taskmodule.StatusAssigned, taskmodule.StatusInProgress:
 			// These are the only non-terminal states in the frozen cancellation
 			// state machine. The leader restriction is stricter than the shared
 			// task:cancel permission and is therefore checked here.
@@ -190,7 +190,7 @@ func (s *CancellationService) CancelTask(ctx context.Context, input Cancellation
 
 		var assignment taskmodule.Assignment
 		var person personnelmodule.CandidateRecord
-		if task.Status == taskmodule.StatusAwaitingConfirmation {
+		if task.Status == taskmodule.StatusPendingDispatch || task.Status == taskmodule.StatusAwaitingConfirmation {
 			if err := tx.InvalidateProposedCandidates(ctx, task.ID, normalized.Reason, now); err != nil {
 				return fmt.Errorf("invalidate proposed candidates for task %s: %w", task.PublicID, err)
 			}
@@ -410,7 +410,7 @@ func (s *CancellationService) appendCancellationAudit(ctx context.Context, tx Ca
 }
 
 func newTaskCancelledEvent(task taskmodule.Instance, assignment taskmodule.Assignment, cancellationID, traceID string, occurredAt time.Time) (event.EventEnvelope, error) {
-	payload := TaskProjectionEventPayload{TaskPublicID: task.PublicID, AssignmentPublicID: assignment.PublicID, ConfirmationID: assignment.ConfirmationID, EmployeePublicID: assignment.PersonnelPublicID, FlightDisplayNo: task.FlightDisplayNo, TaskName: task.Name, AreaName: task.AreaName, PlannedAt: task.PlannedAt.UTC(), BusinessStatus: string(taskmodule.StatusCancelled), Message: task.Message, SyncVersion: task.SyncVersion + 1}
+	payload := TaskProjectionEventPayload{TaskPublicID: task.PublicID, AssignmentPublicID: assignment.PublicID, ConfirmationID: assignment.ConfirmationID, EmployeePublicID: assignment.PersonnelPublicID, FlightDisplayNo: task.FlightDisplayNo, TaskName: task.Name, AreaName: task.AreaName, PlannedAt: task.PlannedAt.UTC(), BusinessStatus: string(taskmodule.StatusCancelled), Message: task.Message, SyncVersion: task.SyncVersion + 1, ReceiptStatus: string(assignment.ReceiptStatus), ReceivedAt: assignment.ReceivedAt}
 	envelope, err := event.NewEvent(EventTaskCancelled, "task", task.PublicID, "core-flight-task", payload)
 	if err != nil {
 		return event.EventEnvelope{}, fmt.Errorf("create task cancelled event: %w", err)

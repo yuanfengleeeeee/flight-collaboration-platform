@@ -112,6 +112,7 @@ func NewServerWithStoreAndAuthAndIdentityAndNotifications(cfg config.ServiceConf
 	if employeeAuth == nil {
 		r.POST(edgerealtime.TicketPath, registerRealtimeUnavailable)
 		r.GET(edgerealtime.WebSocketPath, registerRealtimeUnavailable)
+		r.GET(edgerealtime.NativeWebSocketPath, registerRealtimeUnavailable)
 	} else {
 		r.POST(edgerealtime.TicketPath, employeeAuth, func(c *gin.Context) {
 			principal, err := realtimePrincipal(c)
@@ -137,6 +138,18 @@ func NewServerWithStoreAndAuthAndIdentityAndNotifications(cfg config.ServiceConf
 				return
 			}
 			realtimeEndpoint.ServeHTTP(c.Writer, c.Request, principal.PublicID)
+		})
+		r.GET(edgerealtime.NativeWebSocketPath, realtimeAuthMiddleware(employeeAuth, realtimeEndpoint, identityService), func(c *gin.Context) {
+			principal, err := realtimePrincipal(c)
+			if err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthenticated", "message": "employee authentication is required"})
+				return
+			}
+			if !realtimeEndpoint.Ready() {
+				registerRealtimeUnavailable(c)
+				return
+			}
+			realtimeEndpoint.ServeNativeHTTP(c.Writer, c.Request, principal.PublicID)
 		})
 	}
 	if identityService != nil {
@@ -198,6 +211,117 @@ func NewServerWithStoreAndAuthAndIdentityAndNotifications(cfg config.ServiceConf
 			"request_id":             platformobservability.RequestID(c),
 			"trace_id":               platformobservability.TraceID(c),
 		})
+	})
+	registerEmployeeGET("/api/v1/history", func(c *gin.Context) {
+		if store == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "projection_unavailable", "message": "projection store unavailable"})
+			return
+		}
+		actorPublicID, err := employeeActorPublicID(c)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthenticated", "message": "employee authentication is required"})
+			return
+		}
+		page, pageSize, ok := parseEdgePagination(c)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_history_query", "message": "invalid history pagination"})
+			return
+		}
+		status := strings.TrimSpace(c.Query("status"))
+		if status != "" && status != "completed" && status != "cancelled" && status != "all" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_history_query", "message": "status must be completed, cancelled or all"})
+			return
+		}
+		var items []edgesync.TaskProjection
+		var total int64
+		if historyStore, ok := store.(edgesync.TaskHistoryStore); ok {
+			items, total, err = historyStore.ListTaskHistory(c.Request.Context(), edgesync.TaskHistoryFilter{EmployeePublicID: actorPublicID, Status: status, Page: page, PageSize: pageSize})
+		} else {
+			var values []edgesync.TaskProjection
+			values, err = store.ListTaskProjections(c.Request.Context(), actorPublicID)
+			filtered := make([]edgesync.TaskProjection, 0, len(values))
+			for _, value := range values {
+				valueStatus := value.BusinessStatus
+				if valueStatus == "" {
+					valueStatus = value.Status
+				}
+				if (status == "" || status == "all" || valueStatus == status) && valueStatus != "completed" && valueStatus != "cancelled" {
+					continue
+				}
+				if status == "" || status == "all" || valueStatus == status {
+					filtered = append(filtered, value)
+				}
+			}
+			var totalItems int
+			items, totalItems = paginateEdgeValues(filtered, page, pageSize)
+			total = int64(totalItems)
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "history_read_failed", "message": "history read failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"items": items, "page": page, "page_size": pageSize, "total": total, "source": "edge_projection"}, "request_id": platformobservability.RequestID(c), "trace_id": platformobservability.TraceID(c)})
+	})
+	registerEmployeeGET("/api/v1/notifications", func(c *gin.Context) {
+		if store == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "notification_store_unavailable", "message": "notification store unavailable"})
+			return
+		}
+		notificationStore, ok := store.(edgesync.NotificationStore)
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "notification_store_unavailable", "message": "notification store unavailable"})
+			return
+		}
+		actorPublicID, err := employeeActorPublicID(c)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthenticated", "message": "employee authentication is required"})
+			return
+		}
+		page, pageSize, ok := parseEdgePagination(c)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_notification_query", "message": "invalid notification pagination"})
+			return
+		}
+		status := strings.TrimSpace(c.Query("status"))
+		if status != "" && status != "unread" && status != "read" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_notification_query", "message": "status must be unread or read"})
+			return
+		}
+		items, total, err := notificationStore.ListNotifications(c.Request.Context(), edgesync.NotificationFilter{EmployeePublicID: actorPublicID, Status: status, Page: page, PageSize: pageSize})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "notification_read_failed", "message": "notification read failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"items": items, "page": page, "page_size": pageSize, "total": total}, "request_id": platformobservability.RequestID(c), "trace_id": platformobservability.TraceID(c)})
+	})
+	registerEmployeePOST("/api/v1/notifications/:notificationPublicID/read", func(c *gin.Context) {
+		if store == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "notification_store_unavailable", "message": "notification store unavailable"})
+			return
+		}
+		notificationStore, ok := store.(edgesync.NotificationStore)
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "notification_store_unavailable", "message": "notification store unavailable"})
+			return
+		}
+		actorPublicID, err := employeeActorPublicID(c)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthenticated", "message": "employee authentication is required"})
+			return
+		}
+		if strings.TrimSpace(c.Param("notificationPublicID")) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_notification", "message": "notification public id is required"})
+			return
+		}
+		if err := notificationStore.MarkNotificationRead(c.Request.Context(), actorPublicID, c.Param("notificationPublicID")); err != nil {
+			if errors.Is(err, edgesync.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"code": "notification_not_found", "message": "notification not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "notification_update_failed", "message": "notification update failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"public_id": c.Param("notificationPublicID"), "status": "read"}, "request_id": platformobservability.RequestID(c), "trace_id": platformobservability.TraceID(c)})
 	})
 	registerEmployeePOST("/api/v1/commands", func(c *gin.Context) {
 		if store == nil {
@@ -295,8 +419,56 @@ func NewServerWithStoreAndAuthAndIdentityAndNotifications(cfg config.ServiceConf
 			c.JSON(http.StatusAccepted, gin.H{"command_id": command.CommandID, "status": publicCommandStatus(record.Status), "duplicate": duplicate, "request_id": platformobservability.RequestID(c), "trace_id": command.TraceID})
 		}
 	}
+	registerEmployeePOST("/api/v1/tasks/:taskPublicID/received", registerEmployeeCommand("employee_receive_task.v1"))
+	registerEmployeePOST("/api/v1/tasks/:taskPublicID/start", registerEmployeeCommand("employee_start_task.v1"))
+	// Compatibility for older clients: accept now means execution start. New
+	// clients use /received for the receipt handshake.
 	registerEmployeePOST("/api/v1/tasks/:taskPublicID/accept", registerEmployeeCommand("employee_accept_task.v1"))
 	registerEmployeePOST("/api/v1/tasks/:taskPublicID/complete", registerEmployeeCommand("employee_complete_task.v1"))
+	registerEmployeePOST("/api/v1/tasks/:taskPublicID/exceptions", func(c *gin.Context) {
+		if store == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "command_store_unavailable", "message": "command store unavailable"})
+			return
+		}
+		actorPublicID, actorErr := employeeActorPublicID(c)
+		if actorErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthenticated", "message": "employee authentication is required"})
+			return
+		}
+		var request employeeExceptionReportRequest
+		decodeErr := c.ShouldBindJSON(&request)
+		category := strings.TrimSpace(request.Category)
+		severity := strings.TrimSpace(request.Severity)
+		description := strings.TrimSpace(request.Description)
+		if decodeErr != nil || request.CommandID == "" || request.AssignmentPublicID == "" || request.ExpectedSyncVersion == 0 || category == "" || len(category) > 64 || description == "" || len(description) > 1024 || (severity != "low" && severity != "medium" && severity != "high" && severity != "critical") {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_exception", "message": "command_id, assignment_public_id, expected_sync_version, category, severity and description are required"})
+			return
+		}
+		var clientOccurredAt *time.Time
+		commandOccurredAt := time.Time{}
+		if request.ClientOccurredAt != nil && !request.ClientOccurredAt.IsZero() {
+			occurredAt := request.ClientOccurredAt.UTC()
+			clientOccurredAt = &occurredAt
+			commandOccurredAt = occurredAt
+		}
+		payload := employeeExceptionReportPayload{AssignmentPublicID: strings.TrimSpace(request.AssignmentPublicID), ExpectedSyncVersion: request.ExpectedSyncVersion, Category: category, Severity: severity, Description: description, ClientOccurredAt: clientOccurredAt, ChangeAction: strings.TrimSpace(request.ChangeAction), TargetCandidateID: strings.TrimSpace(request.TargetCandidateID), TargetPlannedAt: request.TargetPlannedAt}
+		command, err := sharedEvent.NewCommandWithID(request.CommandID, "employee_report_task_exception.v1", actorPublicID, c.Param("taskPublicID"), platformobservability.TraceID(c), commandOccurredAt, payload)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "command_create_failed", "message": "command could not be created"})
+			return
+		}
+		duplicate, err := store.PutCommand(c.Request.Context(), command)
+		if err != nil {
+			writeCommandPutError(c, err)
+			return
+		}
+		record, err := store.FindCommand(c.Request.Context(), command.CommandID)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "command_status_unavailable", "message": "command status unavailable"})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"command_id": command.CommandID, "status": publicCommandStatus(record.Status), "duplicate": duplicate, "request_id": platformobservability.RequestID(c), "trace_id": command.TraceID})
+	})
 	r.POST("/internal/sync/v1/events", func(c *gin.Context) {
 		if store == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "sync_store_unavailable", "message": "sync store unavailable"})
@@ -452,8 +624,14 @@ func projectEvent(ctx context.Context, store edgesync.Store, envelope sharedEven
 			payload = wrapped.Projection
 		}
 	}
-	if payload.TaskPublicID == "" || payload.EmployeePublicID == "" || payload.SyncVersion == 0 {
+	if payload.TaskPublicID == "" || payload.SyncVersion == 0 {
 		return fmt.Errorf("%s payload is missing task snapshot fields", envelope.EventType)
+	}
+	// A pending task can be paused before it has an employee projection. The
+	// event is still acknowledged by Inbox; management clients read the Core
+	// fact, while no employee projection is created with an empty audience.
+	if payload.EmployeePublicID == "" {
+		return nil
 	}
 	if payload.BusinessStatus == "" {
 		payload.BusinessStatus = status
@@ -461,13 +639,25 @@ func projectEvent(ctx context.Context, store edgesync.Store, envelope sharedEven
 	if payload.BusinessStatus != status {
 		return fmt.Errorf("%s payload business_status %q does not match event", envelope.EventType, payload.BusinessStatus)
 	}
-	return store.UpsertTaskProjection(ctx, edgesync.TaskProjection{
+	if err := store.UpsertTaskProjection(ctx, edgesync.TaskProjection{
 		PublicID: payload.TaskPublicID, AssignmentPublicID: payload.AssignmentPublicID,
 		EmployeePublicID: payload.EmployeePublicID, FlightDisplayNo: payload.FlightDisplayNo,
 		TaskName: payload.TaskName, AreaName: payload.AreaName, PlannedAt: payload.PlannedAt,
 		Status: status, BusinessStatus: payload.BusinessStatus, Message: payload.Message,
-		SyncVersion: payload.SyncVersion,
-	})
+		ReceiptStatus: payload.ReceiptStatus, ReceivedAt: payload.ReceivedAt, SyncVersion: payload.SyncVersion,
+	}); err != nil {
+		return err
+	}
+	if writer, ok := store.(edgesync.NotificationProjectionWriter); ok {
+		message := payload.Message
+		if strings.TrimSpace(message) == "" {
+			message = fmt.Sprintf("task status changed to %s", status)
+		}
+		if err := writer.UpsertNotificationProjection(ctx, edgesync.NotificationProjection{PublicID: envelope.EventID, EmployeePublicID: payload.EmployeePublicID, Title: "Task status update", Message: message, Status: "unread", SyncVersion: payload.SyncVersion, UpdatedAt: envelope.OccurredAt.UTC()}); err != nil {
+			return fmt.Errorf("write task notification projection: %w", err)
+		}
+	}
+	return nil
 }
 
 func taskChangedNotification(envelope sharedEvent.EventEnvelope) (edgenotification.TaskChanged, bool, error) {
@@ -504,8 +694,11 @@ func taskChangedNotification(envelope sharedEvent.EventEnvelope) (edgenotificati
 			payload = wrapped.Projection
 		}
 	}
-	if payload.TaskPublicID == "" || payload.EmployeePublicID == "" || payload.SyncVersion == 0 {
+	if payload.TaskPublicID == "" || payload.SyncVersion == 0 {
 		return edgenotification.TaskChanged{}, false, fmt.Errorf("%s payload is missing notification fields", envelope.EventType)
+	}
+	if payload.EmployeePublicID == "" {
+		return edgenotification.TaskChanged{}, false, nil
 	}
 	notification, err := edgenotification.NewTaskChanged(payload.EmployeePublicID, payload.TaskPublicID, payload.SyncVersion, status, time.Now().UTC())
 	return notification, true, err
@@ -545,6 +738,38 @@ func employeeActorPublicID(c *gin.Context) (string, error) {
 		return "", fmt.Errorf("employee principal is missing")
 	}
 	return actorPublicID, nil
+}
+
+func parseEdgePagination(c *gin.Context) (int, int, bool) {
+	page, pageSize := 1, 20
+	if raw := c.Query("page"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			return 0, 0, false
+		}
+		page = parsed
+	}
+	if raw := c.Query("page_size"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return 0, 0, false
+		}
+		pageSize = parsed
+	}
+	return page, pageSize, true
+}
+
+func paginateEdgeValues(values []edgesync.TaskProjection, page, pageSize int) ([]edgesync.TaskProjection, int) {
+	total := len(values)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return []edgesync.TaskProjection{}, total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return values[start:end], total
 }
 
 func realtimeAuthMiddleware(employeeAuth gin.HandlerFunc, endpoint *edgerealtime.Endpoint, identityService *edgeidentity.Service) gin.HandlerFunc {
@@ -603,6 +828,31 @@ type employeeTaskCommandRequest struct {
 	ExpectedSyncVersion *uint64    `json:"expected_sync_version"`
 	ClientOccurredAt    *time.Time `json:"client_occurred_at"`
 	Note                string     `json:"note"`
+}
+
+type employeeExceptionReportRequest struct {
+	CommandID           string     `json:"command_id"`
+	AssignmentPublicID  string     `json:"assignment_public_id"`
+	ExpectedSyncVersion uint64     `json:"expected_sync_version"`
+	Category            string     `json:"category"`
+	Severity            string     `json:"severity"`
+	Description         string     `json:"description"`
+	ClientOccurredAt    *time.Time `json:"client_occurred_at"`
+	ChangeAction        string     `json:"change_action"`
+	TargetCandidateID   string     `json:"target_candidate_public_id"`
+	TargetPlannedAt     *time.Time `json:"target_planned_at"`
+}
+
+type employeeExceptionReportPayload struct {
+	AssignmentPublicID  string     `json:"assignment_public_id"`
+	ExpectedSyncVersion uint64     `json:"expected_sync_version"`
+	Category            string     `json:"category"`
+	Severity            string     `json:"severity"`
+	Description         string     `json:"description"`
+	ClientOccurredAt    *time.Time `json:"client_occurred_at,omitempty"`
+	ChangeAction        string     `json:"change_action,omitempty"`
+	TargetCandidateID   string     `json:"target_candidate_public_id,omitempty"`
+	TargetPlannedAt     *time.Time `json:"target_planned_at,omitempty"`
 }
 
 type commandStatusResult struct {
@@ -667,25 +917,33 @@ type employeeTaskCommandPayload struct {
 }
 
 type taskProjectionEventPayload struct {
-	TaskPublicID       string    `json:"task_public_id"`
-	AssignmentPublicID string    `json:"assignment_public_id"`
-	ConfirmationID     string    `json:"confirmation_id,omitempty"`
-	EmployeePublicID   string    `json:"employee_public_id"`
-	FlightDisplayNo    string    `json:"flight_display_no"`
-	TaskName           string    `json:"task_name"`
-	AreaName           string    `json:"area_name"`
-	PlannedAt          time.Time `json:"planned_at"`
-	BusinessStatus     string    `json:"business_status"`
-	Message            string    `json:"message"`
-	SyncVersion        uint64    `json:"sync_version"`
+	TaskPublicID       string     `json:"task_public_id"`
+	AssignmentPublicID string     `json:"assignment_public_id"`
+	ConfirmationID     string     `json:"confirmation_id,omitempty"`
+	EmployeePublicID   string     `json:"employee_public_id"`
+	FlightDisplayNo    string     `json:"flight_display_no"`
+	TaskName           string     `json:"task_name"`
+	AreaName           string     `json:"area_name"`
+	PlannedAt          time.Time  `json:"planned_at"`
+	BusinessStatus     string     `json:"business_status"`
+	Message            string     `json:"message"`
+	SyncVersion        uint64     `json:"sync_version"`
+	ReceiptStatus      string     `json:"receipt_status,omitempty"`
+	ReceivedAt         *time.Time `json:"received_at,omitempty"`
 }
 
 func taskProjectionStatus(eventType string) (string, bool) {
 	switch eventType {
 	case "task.assigned.v1":
 		return "assigned", true
+	case "task.received.v1":
+		return "assigned", true
+	case "task.started.v1":
+		return "in_progress", true
 	case "task.accepted.v1":
 		return "in_progress", true
+	case "task.paused.v1":
+		return "paused", true
 	case "task.completed.v1":
 		return "completed", true
 	case "task.cancelled.v1":

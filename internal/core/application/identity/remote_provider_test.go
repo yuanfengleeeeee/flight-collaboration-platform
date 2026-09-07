@@ -88,3 +88,42 @@ func TestRemoteProviderVerifierResolvesWeComMemberAndCachesAccessToken(t *testin
 		t.Fatalf("unexpected provider call counts: token=%d user=%d", tokenCalls, userCalls)
 	}
 }
+
+func TestRemoteProviderVerifierUsesWeComMiniappCode2Session(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+		switch request.URL.Path {
+		case "/gettoken":
+			_, _ = writer.Write([]byte(`{"access_token":"miniapp-token","expires_in":3600}`))
+		case "/miniapp-jscode2session":
+			if request.URL.Query().Get("access_token") != "miniapp-token" || request.URL.Query().Get("js_code") != "miniapp-code" || request.URL.Query().Get("grant_type") != "authorization_code" {
+				t.Fatalf("unexpected WeCom miniapp code2Session query")
+			}
+			_, _ = writer.Write([]byte(`{"userid":"wecom-miniapp-user","corpid":"corp-id","session_key":"server-only"}`))
+		default:
+			t.Fatalf("unexpected provider path %q", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	verifier, err := NewRemoteProviderVerifier(RemoteProviderConfig{
+		PersonalWeChatAppID:         "wx-app",
+		PersonalWeChatSecret:        "wx-secret",
+		WeComCorpID:                 "corp-id",
+		WeComAgentID:                "7",
+		WeComSecret:                 "wecom-secret",
+		WeComTokenURL:               server.URL + "/gettoken",
+		WeComMiniappCode2SessionURL: server.URL + "/miniapp-jscode2session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	identity, err := verifier.VerifyForClient(context.Background(), ProviderWeCom, "miniapp-code", ClientEmployeeWeComMiniapp, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.ProviderApp != "corp-id:7" || identity.ExternalSubject != "wecom-miniapp-user" {
+		t.Fatalf("unexpected WeCom miniapp identity: %#v", identity)
+	}
+}

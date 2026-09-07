@@ -13,36 +13,43 @@ import (
 	sharedEvent "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/shared/event"
 )
 
-func TestEmployeeAcceptAndCompleteAreAtomicStateTransitions(t *testing.T) {
+func TestEmployeeReceiptStartAndCompleteAreAtomicStateTransitions(t *testing.T) {
 	now := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
 	fake := &employeeCommandFakeTransaction{
 		task:       taskmodule.Instance{ID: 1, PublicID: "task-1", FlightDisplayNo: "CA1234", AreaName: "A1", Name: "Ramp", Message: "do work", PlannedAt: now, Status: taskmodule.StatusAssigned, StatusVersion: 1, SyncVersion: 1},
-		assignment: taskmodule.Assignment{ID: 2, PublicID: "assignment-1", TaskID: 1, PersonnelID: 3, PersonnelPublicID: "employee-1", Status: taskmodule.AssignmentConfirmed},
+		assignment: taskmodule.Assignment{ID: 2, PublicID: "assignment-1", TaskID: 1, PersonnelID: 3, PersonnelPublicID: "employee-1", Status: taskmodule.AssignmentConfirmed, ReceiptStatus: taskmodule.AssignmentReceiptPending},
 		person:     personnelmodule.CandidateRecord{ID: 3, PublicID: "employee-1", WorkState: personnelmodule.WorkStateReserved, StatusVersion: 1},
 	}
 	service := NewEmployeeCommandService(iam.NewAuthorizer(), fixedClock{value: now})
-	accept := newEmployeeCommand(t, CommandEmployeeAcceptTask, "employee-1", 1, "accept-1")
-	if err := service.Handle(context.Background(), fake, accept); err != nil {
+	receive := newEmployeeCommand(t, CommandEmployeeReceiveTask, "employee-1", 1, "receive-1")
+	if err := service.Handle(context.Background(), fake, receive); err != nil {
 		t.Fatal(err)
 	}
-	if fake.task.Status != taskmodule.StatusInProgress || fake.assignment.Status != taskmodule.AssignmentAccepted || fake.person.WorkState != personnelmodule.WorkStateBusy || fake.task.SyncVersion != 2 || len(fake.outbox) != 1 || fake.outbox[0].EventType != EventTaskAccepted {
-		t.Fatalf("accept transition incomplete: task=%#v assignment=%#v person=%#v outbox=%#v", fake.task, fake.assignment, fake.person, fake.outbox)
+	if fake.task.Status != taskmodule.StatusAssigned || fake.assignment.Status != taskmodule.AssignmentConfirmed || fake.assignment.ReceiptStatus != taskmodule.AssignmentReceiptReceived || fake.person.WorkState != personnelmodule.WorkStateReserved || fake.task.SyncVersion != 2 || len(fake.outbox) != 1 || fake.outbox[0].EventType != EventTaskReceived {
+		t.Fatalf("receipt transition incomplete: task=%#v assignment=%#v person=%#v outbox=%#v", fake.task, fake.assignment, fake.person, fake.outbox)
 	}
-	complete := newEmployeeCommand(t, CommandEmployeeCompleteTask, "employee-1", 2, "complete-1")
+	start := newEmployeeCommand(t, CommandEmployeeStartTask, "employee-1", 2, "start-1")
+	if err := service.Handle(context.Background(), fake, start); err != nil {
+		t.Fatal(err)
+	}
+	if fake.task.Status != taskmodule.StatusInProgress || fake.assignment.Status != taskmodule.AssignmentAccepted || fake.person.WorkState != personnelmodule.WorkStateBusy || fake.task.SyncVersion != 3 || len(fake.outbox) != 2 || fake.outbox[1].EventType != EventTaskStarted {
+		t.Fatalf("start transition incomplete: task=%#v assignment=%#v person=%#v outbox=%#v", fake.task, fake.assignment, fake.person, fake.outbox)
+	}
+	complete := newEmployeeCommand(t, CommandEmployeeCompleteTask, "employee-1", 3, "complete-1")
 	if err := service.Handle(context.Background(), fake, complete); err != nil {
 		t.Fatal(err)
 	}
-	if fake.task.Status != taskmodule.StatusCompleted || fake.assignment.Status != taskmodule.AssignmentCompleted || fake.person.WorkState != personnelmodule.WorkStateIdle || fake.task.SyncVersion != 3 || len(fake.outbox) != 2 || fake.outbox[1].EventType != EventTaskCompleted {
+	if fake.task.Status != taskmodule.StatusCompleted || fake.assignment.Status != taskmodule.AssignmentCompleted || fake.person.WorkState != personnelmodule.WorkStateIdle || fake.task.SyncVersion != 4 || len(fake.outbox) != 3 || fake.outbox[2].EventType != EventTaskCompleted {
 		t.Fatalf("complete transition incomplete: task=%#v assignment=%#v person=%#v outbox=%#v", fake.task, fake.assignment, fake.person, fake.outbox)
 	}
-	if len(fake.taskHistories) != 2 || len(fake.assignmentHistories) != 2 || len(fake.personnelHistories) != 2 || len(fake.audits) != 2 {
+	if len(fake.taskHistories) != 2 || len(fake.assignmentHistories) != 2 || len(fake.personnelHistories) != 2 || len(fake.audits) != 3 {
 		t.Fatalf("transition side effects incomplete: task=%d assignment=%d personnel=%d audit=%d", len(fake.taskHistories), len(fake.assignmentHistories), len(fake.personnelHistories), len(fake.audits))
 	}
 }
 
 func TestEmployeeCommandRejectsDifferentActor(t *testing.T) {
-	fake := &employeeCommandFakeTransaction{task: taskmodule.Instance{ID: 1, PublicID: "task-1", Status: taskmodule.StatusAssigned, SyncVersion: 1}, assignment: taskmodule.Assignment{ID: 2, PublicID: "assignment-1", TaskID: 1, PersonnelID: 3, PersonnelPublicID: "employee-1", Status: taskmodule.AssignmentConfirmed}, person: personnelmodule.CandidateRecord{ID: 3, PublicID: "employee-1", WorkState: personnelmodule.WorkStateReserved, StatusVersion: 1}}
-	command := newEmployeeCommand(t, CommandEmployeeAcceptTask, "employee-2", 1, "accept-forbidden")
+	fake := &employeeCommandFakeTransaction{task: taskmodule.Instance{ID: 1, PublicID: "task-1", Status: taskmodule.StatusAssigned, SyncVersion: 1}, assignment: taskmodule.Assignment{ID: 2, PublicID: "assignment-1", TaskID: 1, PersonnelID: 3, PersonnelPublicID: "employee-1", Status: taskmodule.AssignmentConfirmed, ReceiptStatus: taskmodule.AssignmentReceiptPending}, person: personnelmodule.CandidateRecord{ID: 3, PublicID: "employee-1", WorkState: personnelmodule.WorkStateReserved, StatusVersion: 1}}
+	command := newEmployeeCommand(t, CommandEmployeeReceiveTask, "employee-2", 1, "receive-forbidden")
 	err := NewEmployeeCommandService(iam.NewAuthorizer(), fixedClock{value: time.Now().UTC()}).Handle(context.Background(), fake, command)
 	if CommandCode(err) != ResultNotAssignedToActor || len(fake.outbox) != 0 {
 		t.Fatalf("unexpected actor rejection: code=%s err=%v outbox=%d", CommandCode(err), err, len(fake.outbox))
@@ -78,6 +85,20 @@ func (f *employeeCommandFakeTransaction) FindAssignmentForUpdate(context.Context
 }
 func (f *employeeCommandFakeTransaction) FindPersonnelForUpdate(context.Context, uint64) (personnelmodule.CandidateRecord, error) {
 	return f.person, nil
+}
+func (f *employeeCommandFakeTransaction) MarkAssignmentReceived(_ context.Context, _ uint64, changedAt time.Time) error {
+	if f.assignment.ReceiptStatus != taskmodule.AssignmentReceiptPending {
+		return ErrNotFound
+	}
+	f.assignment.ReceiptStatus, f.assignment.ReceivedAt = taskmodule.AssignmentReceiptReceived, &changedAt
+	return nil
+}
+func (f *employeeCommandFakeTransaction) UpdateTaskSyncVersion(_ context.Context, _ uint64, expected uint64, _ time.Time) error {
+	if f.task.SyncVersion != expected {
+		return ErrNotFound
+	}
+	f.task.SyncVersion++
+	return nil
 }
 func (f *employeeCommandFakeTransaction) UpdateTaskInProgress(_ context.Context, _ uint64, expected uint64, _ time.Time) error {
 	if f.task.StatusVersion != expected {

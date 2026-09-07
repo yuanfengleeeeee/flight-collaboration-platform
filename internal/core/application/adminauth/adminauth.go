@@ -327,7 +327,7 @@ func principalView(principal security.Principal) PrincipalView {
 
 func IsValidAdminRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case security.RoleAdmin, security.RoleManager, security.RoleLeader:
+	case security.RoleAdmin, security.RoleManager, security.RoleLeader, security.RoleSupervisor:
 		return true
 	default:
 		return false

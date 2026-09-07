@@ -13,8 +13,13 @@ import (
 	coreapp "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application"
 	coreadminauth "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/adminauth"
 	coreadminquery "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/adminquery"
+	coreflightsync "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flightsync"
 	coreflighttask "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flighttask"
 	coreidentity "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/identity"
+	coremanagement "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/management"
+	coremanagementrealtime "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/managementrealtime"
+	coreoperations "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/operations"
+	coretaskchange "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/taskchange"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/module/iam"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/clock"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/config"
@@ -55,22 +60,26 @@ func main() {
 	var arrivalService *coreflighttask.Service
 	var confirmationService *coreflighttask.ConfirmationService
 	var cancellationService *coreflighttask.CancellationService
+	var flightSyncService *coreflightsync.Service
 	var taskQueryService *coreflighttask.TaskQueryService
 	var identityService *coreidentity.Service
 	if db != nil {
 		repository := coremysql.NewFlightTaskRepository(db)
 		arrivalService = coreflighttask.NewService(repository, clock.Real{})
 		confirmationService = coreflighttask.NewConfirmationService(repository, iam.NewAuthorizer(), clock.Real{})
+		arrivalService.SetAutomaticDispatcher(coreflighttask.NewAutomaticDispatcher(confirmationService, nil))
+		flightSyncService = coreflightsync.NewService(coremysql.NewFlightSourceRepository(db), arrivalService, clock.Real{})
 		cancellationService = coreflighttask.NewCancellationService(repository, iam.NewAuthorizer(), clock.Real{})
 		taskQueryService = coreflighttask.NewTaskQueryService(repository, iam.NewAuthorizer())
 		providerVerifier := coreidentity.ProviderVerifier(coreidentity.DisabledProviderVerifier{})
 		if cfg.Identity.RealProvidersEnabled {
 			remoteVerifier, verifierErr := coreidentity.NewRemoteProviderVerifier(coreidentity.RemoteProviderConfig{
-				PersonalWeChatAppID:  cfg.Identity.PersonalWeChatAppID,
-				PersonalWeChatSecret: cfg.Identity.PersonalWeChatSecret,
-				WeComCorpID:          cfg.Identity.WeComCorpID,
-				WeComAgentID:         cfg.Identity.WeComAgentID,
-				WeComSecret:          cfg.Identity.WeComSecret,
+				PersonalWeChatAppID:         cfg.Identity.PersonalWeChatAppID,
+				PersonalWeChatSecret:        cfg.Identity.PersonalWeChatSecret,
+				WeComCorpID:                 cfg.Identity.WeComCorpID,
+				WeComAgentID:                cfg.Identity.WeComAgentID,
+				WeComSecret:                 cfg.Identity.WeComSecret,
+				WeComMiniappCode2SessionURL: cfg.Identity.WeComMiniappCode2SessionURL,
 			})
 			if verifierErr != nil {
 				log.Error("configure real identity providers failed", zap.Error(verifierErr))
@@ -91,8 +100,16 @@ func main() {
 	}
 	var adminAuthService *coreadminauth.Service
 	var adminQueryService *coreadminquery.Service
+	var managementService *coremanagement.Service
+	var operationsService *coreoperations.Service
+	var taskChangeService *coretaskchange.Service
+	var managementRealtimeService *coremanagementrealtime.Service
 	if db != nil {
 		adminQueryService = coreadminquery.NewService(coremysql.NewAdminQueryRepository(db), iam.NewAuthorizer())
+		managementService = coremanagement.NewService(coremysql.NewManagementRepository(db), iam.NewAuthorizer(), clock.Real{})
+		operationsService = coreoperations.NewService(coremysql.NewOperationsRepository(db), iam.NewAuthorizer(), coreoperations.RuntimeInfo{Environment: cfg.Core.Mode, RedisEnabled: rdb != nil, FlightSourceConfigured: strings.TrimSpace(cfg.Core.FlightSourceAPIKey) != "", RealIdentityProvider: cfg.Identity.RealProvidersEnabled, DevelopmentActorHeaders: cfg.Core.AllowDevActorHeaders})
+		taskChangeService = coretaskchange.NewService(coremysql.NewTaskChangeRepository(db), iam.NewAuthorizer(), clock.Real{})
+		managementRealtimeService = coremanagementrealtime.NewService(coremysql.NewManagementRealtimeRepository(db), iam.NewAuthorizer())
 	}
 	if db != nil && cfg.Identity.AdminSSOEnabled {
 		var adminProvider coreadminauth.Provider = coreadminauth.DisabledProvider{}
@@ -128,7 +145,7 @@ func main() {
 			AllowedRedirectURI: splitConfigList(cfg.Identity.AdminSSOAllowedRedirect),
 		})
 	}
-	server := coreapp.NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuth(cfg.Core, db, rdb, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, cfg.Identity.InternalAPIKey, adminAuthService, adminQueryService)
+	server := coreapp.NewServerWithFlightTaskAndConfirmationAndCancellationAndAuthAndTaskQueryAndIdentityAndAdminAuthAndManagementAndFlightSyncAndOperationsAndTaskChangeAndRealtime(cfg.Core, db, rdb, log, arrivalService, confirmationService, cancellationService, authenticator, taskQueryService, identityService, cfg.Identity.InternalAPIKey, adminAuthService, adminQueryService, managementService, flightSyncService, operationsService, taskChangeService, managementRealtimeService)
 	if err := server.Run(ctx); err != nil {
 		log.Error("core api stopped with error", zap.Error(err))
 	}

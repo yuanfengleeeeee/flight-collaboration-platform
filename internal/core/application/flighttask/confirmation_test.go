@@ -32,7 +32,7 @@ func TestConfirmTaskAtomicallyAssignsCandidate(t *testing.T) {
 	if person := repository.people[11]; person.WorkState != personnelmodule.WorkStateReserved || person.StatusVersion != 1 {
 		t.Fatalf("personnel was not reserved: %#v", person)
 	}
-	if repository.candidates[0].Status != taskmodule.CandidateSelected || repository.candidates[1].Status != taskmodule.CandidateRejected || repository.candidates[1].RejectionReason != "not_selected" {
+	if repository.candidates[0].Status != taskmodule.CandidateSelected || repository.candidates[1].Status != taskmodule.CandidateProposed {
 		t.Fatalf("candidate statuses = %#v", repository.candidates)
 	}
 	if len(repository.assignments) != 1 || repository.assignments[0].ConfirmationID != "confirmation-1" || len(repository.taskHistories) != 1 || len(repository.assignmentHistories) != 1 || len(repository.personnelHistories) != 1 || len(repository.audits) != 1 || len(repository.outbox) != 1 {
@@ -125,6 +125,56 @@ func TestConfirmTaskRejectsAlreadyAssignedTask(t *testing.T) {
 	}
 	if len(repository.assignments) != 0 || repository.people[11].WorkState != personnelmodule.WorkStateIdle {
 		t.Fatalf("already-assigned command changed facts: assignments=%d person=%#v", len(repository.assignments), repository.people[11])
+	}
+}
+
+func TestAutomaticDispatcherAssignsWithoutEmployeeApproval(t *testing.T) {
+	now := time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC)
+	repository := newConfirmationFakeRepository(now)
+	repository.task.Status = taskmodule.StatusPendingDispatch
+	confirmation := NewConfirmationService(repository, iam.NewAuthorizer(), fixedClock{value: now})
+	dispatcher := NewAutomaticDispatcher(confirmation, nil)
+
+	result, err := dispatcher.Dispatch(context.Background(), ArrivalResult{
+		TaskPublicID: "task-1",
+		Candidates: []CandidateView{
+			{PublicID: "candidate-1", PersonnelPublicID: "person-1", Rank: 1},
+			{PublicID: "candidate-2", PersonnelPublicID: "person-2", Rank: 2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TaskStatus != string(taskmodule.StatusAssigned) || result.AssignmentStatus != string(taskmodule.AssignmentConfirmed) || len(repository.assignments) != 1 || repository.assignments[0].ConfirmedByPublicID != AutomaticDispatchActorID {
+		t.Fatalf("automatic dispatch did not assign: result=%#v assignments=%#v", result, repository.assignments)
+	}
+}
+
+func TestAutomaticDispatcherRetriesNextCandidateAfterConflict(t *testing.T) {
+	now := time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC)
+	repository := newConfirmationFakeRepository(now)
+	repository.task.Status = taskmodule.StatusPendingDispatch
+	firstPerson := repository.people[11]
+	firstPerson.WorkState = personnelmodule.WorkStateBusy
+	repository.people[11] = firstPerson
+	confirmation := NewConfirmationService(repository, iam.NewAuthorizer(), fixedClock{value: now})
+	dispatcher := NewAutomaticDispatcher(confirmation, nil)
+
+	result, err := dispatcher.Dispatch(context.Background(), ArrivalResult{
+		TaskPublicID: "task-1",
+		Candidates: []CandidateView{
+			{PublicID: "candidate-1", PersonnelPublicID: "person-1", Rank: 1},
+			{PublicID: "candidate-2", PersonnelPublicID: "person-2", Rank: 2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TaskStatus != string(taskmodule.StatusAssigned) || result.PersonnelPublicID != "person-2" || len(repository.assignments) != 1 {
+		t.Fatalf("dispatcher did not fall back to the next candidate: result=%#v assignments=%#v", result, repository.assignments)
+	}
+	if repository.candidates[0].Status != taskmodule.CandidateInvalidated || repository.candidates[1].Status != taskmodule.CandidateSelected {
+		t.Fatalf("candidate fallback statuses = %#v", repository.candidates)
 	}
 }
 
@@ -276,9 +326,6 @@ func (tx *confirmationFakeTransaction) MarkCandidatesConfirmed(_ context.Context
 			candidate.Status = taskmodule.CandidateSelected
 			candidate.SelectedAt = &changedAt
 			selected = true
-		} else if candidate.Status == taskmodule.CandidateProposed {
-			candidate.Status = taskmodule.CandidateRejected
-			candidate.RejectionReason = "not_selected"
 		}
 	}
 	if !selected {
@@ -288,7 +335,7 @@ func (tx *confirmationFakeTransaction) MarkCandidatesConfirmed(_ context.Context
 }
 
 func (tx *confirmationFakeTransaction) UpdateTaskAssigned(_ context.Context, taskID, expectedStatusVersion uint64, changedAt time.Time) error {
-	if tx.repository.task.ID != taskID || tx.repository.task.Status != taskmodule.StatusAwaitingConfirmation || tx.repository.task.StatusVersion != expectedStatusVersion {
+	if tx.repository.task.ID != taskID || (tx.repository.task.Status != taskmodule.StatusPendingDispatch && tx.repository.task.Status != taskmodule.StatusAwaitingConfirmation) || tx.repository.task.StatusVersion != expectedStatusVersion {
 		return ErrTaskVersionConflict
 	}
 	tx.repository.task.Status = taskmodule.StatusAssigned

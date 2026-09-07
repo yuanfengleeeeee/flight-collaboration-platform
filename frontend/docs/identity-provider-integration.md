@@ -2,18 +2,18 @@
 
 ## 结论
 
-需要开发微信小程序，但它只负责员工端的微信入口和页面；它不是整个认证系统。
+需要开发两个员工小程序：个人微信小程序和企业微信小程序。它们只负责员工端的平台入口和页面，不是整个认证系统。
 
 - 个人微信：原生小程序调用 `wx.login()` 获取一次性 code，业务后端向微信 `code2Session` 换取 OpenID/UnionID，再在 Core 的绑定表中映射到员工 `Staff`。
-- 企业微信：员工端可以采用企业微信 OAuth/H5 入口，也可以配置企业微信容器内的小程序入口。两者都只把一次性 code 交给后端，后端调用企业微信接口解析企业成员身份。
+- 企业微信：员工端使用独立的企业微信小程序入口，调用 `wx.qy.login()` 取得一次性 code；后端使用企业微信 access token 调用小程序 `jscode2session` 解析企业成员 `UserID`。这条路径与管理端浏览器 OAuth 的 `getuserinfo` 兑换接口分开。
 - 管理端：浏览器 Web 不需要再开发一个小程序。当前项目没有 OIDC，管理端使用企业微信 OAuth；浏览器回调一次性授权码，后端验证后签发 Core 管理会话。未来如果企业已有其他身份源，再单独增加 Provider。
 
-因此，微信/企业微信员工入口与管理端 SSO 是三种客户端入口，共用“服务端身份映射和会话”能力，不共用页面：
+因此，员工端有三个独立入口（员工 Web、个人微信小程序、企业微信小程序），管理端是另一个独立的 Web 客户端。它们共用“服务端身份映射和会话”能力，但不共用平台页面：
 
 ```text
-个人微信小程序 ─┐
-企业微信 OAuth/小程序 ─┼─> Edge ─> Core 身份 Provider ─> Staff / Session
-员工 Web ─────────────┘
+个人微信小程序 ───────┐
+企业微信小程序 ───────┼─> Edge ─> Core 身份 Provider ─> 项目员工库 Staff / Session
+员工 Web ────────────┘
 
 管理端 Web ─> 管理 SSO 回调 ─> Core 管理会话 ─> Core Task API
 ```
@@ -25,7 +25,8 @@
 Core 新增真实 Provider 适配器，默认仍关闭：
 
 - `personal_wechat`：调用 `https://api.weixin.qq.com/sns/jscode2session`，仅保存绑定所需的 OpenID，不把 `session_key` 下发给 Edge 或客户端。
-- `wecom`：调用企业微信 `gettoken` 和 `getuserinfo`，只接受企业成员 `UserId` 映射到内部员工，不把企业微信 access token 下发给客户端。
+- `wecom` 浏览器授权适配：调用企业微信 `gettoken` 和 `getuserinfo`，只接受企业成员 `UserId` 映射到内部员工，不把企业微信 access token 下发给客户端。
+- 企业微信小程序的 code 使用单独的 `miniprogram/jscode2session` 接口兑换；后端只保留必要的成员标识，不把 `session_key` 下发给客户端。
 - Provider application scope 由后端配置决定，客户端不能伪造 AppID、CorpID 或绑定范围。
 - 企业微信 access token 只做短期内存缓存；Core 的 Staff、绑定、Audit 和 Edge Session 仍是持久事实。
 
@@ -39,15 +40,16 @@ identity:
   wecom_corp_id: ""
   wecom_agent_id: ""
   wecom_secret: ""
+  wecom_miniapp_code2session_url: ""
 ```
 
 生产环境应通过 `FLIGHT_IDENTITY_*` 环境变量或密钥管理系统注入 Secret，并将 `real_providers_enabled` 显式设为 `true`。不允许把 Secret 放入 `frontend`、小程序包、Git 或浏览器地址栏。
 
-小程序原生壳已注册在 `frontend/apps/employee-miniapp/app.json`，并提供登录、任务、详情、账号页。`src/app/provider-login.ts` 复用了现有 Edge Session 协议：首次绑定使用“工号密码 + 新的 Provider code”，后续使用新的 Provider code 直接换取 Edge Session。Accept/Complete 仍通过 Edge Command，HTTP 202 不是最终业务成功。
+个人微信小程序原生壳位于 `frontend/apps/employee-miniapp`，企业微信小程序原生壳位于 `frontend/apps/employee-wecom-miniapp`；两者都提供登录、任务、详情、账号页。它们复用现有 Edge Session 协议：首次绑定使用项目员工工号密码加当前平台的 Provider code，后续使用当前平台 code 直接换取 Edge Session。received/start/complete 仍通过 Edge Command；received 只表示已收到通知，HTTP 202 不是最终业务成功。
 
 ### 员工数据库边界
 
-因为没有 OIDC，平台使用 Core MySQL 内的员工主数据和凭证库作为登录事实源。当前冻结架构下不再增加第三套独立物理数据库；Core 已拥有员工库的逻辑表：
+因为没有 OIDC，平台使用项目自有的员工主数据和凭证库作为登录事实源。这套员工库独立于企业现有 HR/员工数据库，不做同步，也不要求企业 HR 系统提供员工账号；在当前冻结架构中，它作为 Core MySQL 内的项目员工主数据模块落地，不增加第三套物理数据库。Core 已拥有员工库的逻辑表：
 
 - `operation_area`、`team`、`team_member`：组织、区域和团队关系。
 - `personnel`：员工工号、姓名、团队、岗位、能力、工作状态和启用状态。
@@ -55,7 +57,7 @@ identity:
 - `external_identity_binding`：个人微信/企业微信与同一 `personnel` 的绑定关系。
 - `admin_identity`：管理端企业微信身份到 `admin/manager/leader` 及 Scope 的映射。
 
-小程序、员工 Web 和企业微信只通过 Edge 登录；Edge 不直连这些表。员工主数据和凭证的新增、停用、重置密码以及企业微信 UserId 绑定必须通过管理端受权限保护的 Core API 或受控导入流程完成。
+管理后台的人员管理模块应通过受权限保护的 Core API 新增员工、维护员工工号/姓名/岗位、创建团队/区域并把员工加入对应分工组；员工主数据和凭证的新增、停用、重置密码以及企业微信 UserId 绑定都必须在项目员工库内完成。当前代码已提供人员/Assignment 查询，人员写入、分工组维护和受控导入仍属于下一业务切片，前端页面暂显示明确空态，不伪造写入成功。个人微信小程序、企业微信小程序和员工 Web 只通过 Edge 登录，Edge 不直连这些表。
 
 ### 管理端 SSO
 
@@ -71,7 +73,7 @@ identity:
 ## 联调前必须准备
 
 1. 注册个人微信小程序并配置服务器 HTTPS request 域名；准备 AppID/AppSecret。
-2. 在企业微信管理后台创建自建应用，准备 CorpID、AgentID、Secret，并配置可信域名/回调地址；员工端确认采用企业微信 OAuth H5 还是企业微信容器内小程序，管理端将 `admin_sso_provider` 设置为 `wecom`。
+2. 在企业微信管理后台创建企业微信小程序/应用，准备 CorpID、AgentID、Secret，并配置企业微信小程序合法域名；管理端将 `admin_sso_provider` 设置为 `wecom`，管理端回调使用 HTTPS 可信域名。
 3. 提供 Core 可访问微信和企业微信接口的出网 HTTPS、超时、代理和证书策略。
 4. 准备一条已启用 Staff 和工号密码；第一次登录只用于完成绑定，之后由 Core 绑定表复用同一员工身份。
 5. 确认管理端身份源及管理员映射规则；在没有这一步前，只能继续使用开发 Actor 或人工注入 Core JWT。启用 SSO 时还要先应用 Core `000005_admin_sso` migration，并预置已启用的 `admin_identity`。
@@ -86,4 +88,4 @@ identity:
 
 Core 已提供管理端 SSO 的后端合同和会话实现：`GET /api/v1/admin/auth/sso/start`、`POST /api/v1/admin/auth/sso/exchange`、`GET /api/v1/admin/auth/me` 和 `POST /api/v1/admin/auth/logout`。Core 会校验 redirect allow-list、一次性消费 state、查找预置的 `admin_identity`，并签发 Core audience JWT；角色和 Team/Area/User scope 在后端会话中恢复，前端不能自行扩大权限。
 
-当前实现默认关闭。上线前仍需提供实际 OIDC/IAM 身份源、HTTPS 回调域名、Secret 管理和 `admin_identity` 预置；这些配置与联调没有在本地伪造完成。
+当前实现默认关闭。上线前仍需提供企业微信 CorpID/AgentID/Secret、HTTPS 回调域名、Secret 管理和 `admin_identity` 预置；这些生产配置与平台联调没有在本地伪造完成。当前不依赖 OIDC；若未来增加其他身份源，再新增对应 Provider。

@@ -1,0 +1,2 @@
+.notification-card { padding-bottom: 24rpx; }
+.notification-message { margin-top: 18rpx; color: #163d48; }

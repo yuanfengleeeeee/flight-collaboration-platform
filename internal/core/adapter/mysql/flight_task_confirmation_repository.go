@@ -136,18 +136,15 @@ func (tx *transaction) MarkCandidatesConfirmed(ctx context.Context, taskID, sele
 	if selected.RowsAffected != 1 {
 		return flighttask.ErrCandidateNoLongerEligible
 	}
-	rejected := tx.db.WithContext(ctx).Table("task_candidate").
-		Where("task_id = ? AND status = ?", taskID, string(taskmodule.CandidateProposed)).
-		Updates(map[string]any{"status": string(taskmodule.CandidateRejected), "rejection_reason": "not_selected", "updated_at": changedAt.UTC()})
-	if rejected.Error != nil {
-		return fmt.Errorf("reject unselected task candidates: %w", rejected.Error)
-	}
+	// Keep the remaining proposed candidates available for automatic timeout
+	// reassignment or a manager-approved reallocation. They are not rejected;
+	// eligibility is rechecked under a personnel lock when selected.
 	return nil
 }
 
 func (tx *transaction) UpdateTaskAssigned(ctx context.Context, taskID, expectedStatusVersion uint64, changedAt time.Time) error {
 	result := tx.db.WithContext(ctx).Table("task_instance").
-		Where("id = ? AND status = ? AND status_version = ?", taskID, string(taskmodule.StatusAwaitingConfirmation), expectedStatusVersion).
+		Where("id = ? AND status IN ? AND status_version = ?", taskID, []string{string(taskmodule.StatusPendingDispatch), string(taskmodule.StatusAwaitingConfirmation)}, expectedStatusVersion).
 		Updates(map[string]any{"status": string(taskmodule.StatusAssigned), "status_version": expectedStatusVersion + 1, "sync_version": clause.Expr{SQL: "sync_version + 1"}, "updated_at": changedAt.UTC()})
 	if result.Error != nil {
 		return fmt.Errorf("update task assigned: %w", result.Error)
@@ -163,7 +160,7 @@ func (tx *transaction) CreateAssignment(ctx context.Context, value *taskmodule.A
 		return fmt.Errorf("task assignment is nil")
 	}
 	now := time.Now().UTC()
-	row := taskAssignmentRow{PublicID: value.PublicID, TaskID: value.TaskID, CandidateID: value.CandidateID, PersonnelID: value.PersonnelID, Status: string(value.Status), StatusVersion: value.StatusVersion, ConfirmationID: value.ConfirmationID, ConfirmedByPublicID: value.ConfirmedByPublicID, ConfirmedAt: value.ConfirmedAt.UTC(), CreatedAt: now, UpdatedAt: now}
+	row := taskAssignmentRow{PublicID: value.PublicID, TaskID: value.TaskID, CandidateID: value.CandidateID, PersonnelID: value.PersonnelID, Status: string(value.Status), StatusVersion: value.StatusVersion, ReceiptStatus: string(value.ReceiptStatus), ReceivedAt: value.ReceivedAt, ConfirmationID: value.ConfirmationID, ConfirmedByPublicID: value.ConfirmedByPublicID, ConfirmedAt: value.ConfirmedAt.UTC(), CreatedAt: now, UpdatedAt: now}
 	if err := tx.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return mapWriteError(err)
 	}
@@ -282,18 +279,21 @@ func (row personnelConfirmationRow) toDomain() (personnelmodule.CandidateRecord,
 }
 
 type taskAssignmentRow struct {
-	ID                  uint64    `gorm:"column:id;primaryKey"`
-	PublicID            string    `gorm:"column:public_id"`
-	TaskID              uint64    `gorm:"column:task_id"`
-	CandidateID         uint64    `gorm:"column:candidate_id"`
-	PersonnelID         uint64    `gorm:"column:personnel_id"`
-	Status              string    `gorm:"column:status"`
-	StatusVersion       uint64    `gorm:"column:status_version"`
-	ConfirmationID      string    `gorm:"column:confirmation_id"`
-	ConfirmedByPublicID string    `gorm:"column:confirmed_by_public_id"`
-	ConfirmedAt         time.Time `gorm:"column:confirmed_at"`
-	CreatedAt           time.Time `gorm:"column:created_at"`
-	UpdatedAt           time.Time `gorm:"column:updated_at"`
+	ID                  uint64     `gorm:"column:id;primaryKey"`
+	PublicID            string     `gorm:"column:public_id"`
+	TaskID              uint64     `gorm:"column:task_id"`
+	CandidateID         uint64     `gorm:"column:candidate_id"`
+	PersonnelID         uint64     `gorm:"column:personnel_id"`
+	Status              string     `gorm:"column:status"`
+	StatusVersion       uint64     `gorm:"column:status_version"`
+	ReceiptStatus       string     `gorm:"column:receipt_status"`
+	ConfirmationID      string     `gorm:"column:confirmation_id"`
+	ConfirmedByPublicID string     `gorm:"column:confirmed_by_public_id"`
+	ConfirmedAt         time.Time  `gorm:"column:confirmed_at"`
+	ReceivedAt          *time.Time `gorm:"column:received_at"`
+	PersonnelPublicID   string     `gorm:"-"`
+	CreatedAt           time.Time  `gorm:"column:created_at"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at"`
 }
 
 func (taskAssignmentRow) TableName() string { return "task_assignment" }

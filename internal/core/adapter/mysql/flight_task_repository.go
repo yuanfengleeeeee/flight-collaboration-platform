@@ -258,18 +258,26 @@ type flightRow struct {
 	ID                  uint64     `gorm:"column:id;primaryKey"`
 	PublicID            string     `gorm:"column:public_id"`
 	DisplayNo           string     `gorm:"column:flight_display_no"`
+	SourceProvider      string     `gorm:"column:source_provider"`
+	ExternalFlightID    string     `gorm:"column:external_flight_id"`
 	OperatingDate       time.Time  `gorm:"column:operating_date"`
 	ScheduledAt         time.Time  `gorm:"column:scheduled_at"`
+	SourceLastSyncedAt  *time.Time `gorm:"column:source_last_synced_at"`
+	SourceState         string     `gorm:"column:source_state"`
+	SourceLastAttemptAt *time.Time `gorm:"column:source_last_attempt_at"`
+	SourceLastError     string     `gorm:"column:source_last_error"`
 	ActualArrivalAt     *time.Time `gorm:"column:actual_arrival_at"`
 	Status              string     `gorm:"column:status"`
 	StatusVersion       uint64     `gorm:"column:status_version"`
 	LastStatusChangedAt time.Time  `gorm:"column:last_status_changed_at"`
+	CreatedAt           time.Time  `gorm:"column:created_at"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at"`
 }
 
 func (flightRow) TableName() string { return "flight" }
 
 func (row flightRow) toDomain() flightmodule.Record {
-	return flightmodule.Record{ID: row.ID, PublicID: row.PublicID, DisplayNo: row.DisplayNo, OperatingDate: row.OperatingDate.UTC(), ScheduledAt: row.ScheduledAt.UTC(), ActualArrivalAt: row.ActualArrivalAt, Status: flightmodule.Status(row.Status), StatusVersion: row.StatusVersion, LastStatusChangedAt: row.LastStatusChangedAt.UTC()}
+	return flightmodule.Record{ID: row.ID, PublicID: row.PublicID, DisplayNo: row.DisplayNo, SourceProvider: row.SourceProvider, ExternalFlightID: row.ExternalFlightID, OperatingDate: row.OperatingDate.UTC(), ScheduledAt: row.ScheduledAt.UTC(), SourceLastSyncedAt: row.SourceLastSyncedAt, SourceState: flightmodule.SourceState(row.SourceState), SourceLastAttemptAt: row.SourceLastAttemptAt, SourceLastError: row.SourceLastError, ActualArrivalAt: row.ActualArrivalAt, Status: flightmodule.Status(row.Status), StatusVersion: row.StatusVersion, LastStatusChangedAt: row.LastStatusChangedAt.UTC()}
 }
 
 type flightStatusHistoryRow struct {

@@ -1,11 +1,12 @@
 core:
   port: 8081
   mode: debug
+  flight_source_api_key: change-me-local-flight-source-key
   db:
     host: 127.0.0.1
     port: 3310
     username: core_app
-    password: change-me-local
+    password: change-me
     database: flight_core
     max_idle_conns: 2
     max_open_conns: 10
@@ -32,7 +33,7 @@ edge:
     host: 127.0.0.1
     port: 3311
     username: edge_app
-    password: change-me-local
+    password: change-me
     database: flight_edge
     max_idle_conns: 2
     max_open_conns: 10
@@ -59,6 +60,7 @@ sync:
   max_attempts: 5
   request_timeout_ms: 3000
   claim_lease_seconds: 30
+  assignment_receipt_timeout_seconds: 300
   tls:
     enabled: false
     cert_file: ""
@@ -81,6 +83,7 @@ identity:
   wecom_corp_id: ""
   wecom_agent_id: ""
   wecom_secret: ""
+  wecom_miniapp_code2session_url: ""
   access_token_ttl_seconds: 900
   session_ttl_hours: 720
   session_absolute_ttl_hours: 2160

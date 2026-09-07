@@ -1,18 +1,32 @@
 # 项目进度
 
-## 2026-09-03 无 OIDC 方案与员工数据库边界确认
+> 说明：本文保留按时间排列的验证与演进记录。较早条目中的 `Accept`、`awaiting_confirmation`、旧入口和未完成判断均为历史事实，不代表当前流程；当前口径以文末最新日期条目及 [`docs/business-process-v2.md`](../docs/business-process-v2.md) 为准。
+
+## 2026-09-04 本轮后端业务实现收口
+
+- [x] 外部航班事实已落地两阶段同步链路：Provider 标准化 port、`POST /internal/integration/v1/flight-source/sync`、Core `flight_source_inbox` 持久化幂等键、批量 lease、Worker 应用、指数退避和失败诊断；接口只返回接收统计，不等待任务生成。
+- [x] 航班管理端没有新增/修改航班入口；`GET /api/v1/flights` 继续从 Core 事实库分页读取，开发种子数据只用于本地验收，真实 Provider 适配位置保留。
+- [x] 独立岗位/能力字典已完成分页 List、Create、Update、Delete（安全停用）及审计；编码创建后不可变，人员和任务模板只能绑定一个启用的岗位编码及一个启用的能力编码，旧数组字段仅作单值兼容。
+- [x] Admin Web 已接入岗位/能力、人员状态/状态历史、事件、审计、Scope、诊断模块；人员新增表单使用字典选择器，工号限制为 4–12 位纯数字。
+- [x] Core migration `000008_reference_dictionaries`、`000009_flight_source_inbox` 已在本地 Core 数据库执行到 `applied`；未执行回滚、清库、TRUNCATE、Volume 删除或其他破坏性操作。
+- [x] 本轮代码收口后需以最终命令输出为准记录 Go、前端、OpenAPI YAML、Compose 和 diff 检查结果；真实 Provider 凭据/协议、生产 HTTPS/SSO、性能基线和故障恢复仍未宣称完成。
+
+## 2026-09-03 无 OIDC 方案、员工数据库边界与四客户端确认
 
 - 用户确认当前没有 OIDC；管理端 SSO 采用企业微信浏览器 OAuth 直连，不需要开发管理端小程序。Core 管理 SSO Provider 白名单已放行 `wecom`，默认配置也以 `wecom` 为主；OIDC 适配器仅作为未来可选扩展，不是当前部署依赖。
-- “新的员工数据库”按已冻结的 Core/Edge 架构实现为 Core MySQL 内的员工主数据/凭证模块，不新增第三套物理数据库。组织/人员事实使用 `operation_area`、`team`、`personnel`、`team_member`，账号使用 `employee_credential`，个人微信和企业微信绑定使用 `external_identity_binding`，管理端身份使用 `admin_identity`。
+- “新的员工数据库”在业务上独立于企业现有 HR/员工数据库，不做 HR 同步，也不要求企业员工库提供账号；按已冻结的 Core/Edge 架构，它由 Core MySQL 内的独立员工主数据/凭证模块承载，不连接企业 HR。组织/人员事实使用 `operation_area`、`team`、`personnel`、`team_member`，账号使用 `employee_credential`，个人微信和企业微信绑定使用 `external_identity_binding`，管理端身份使用 `admin_identity`。如果后续要求单独物理 MySQL，则需要重新打开架构决策，不能直接新增数据库。
 - 企业微信管理 Provider 已覆盖授权地址生成、服务端 access token 缓存、成员 `UserId` 解析和不接收企业外部联系人的约束；真实 CorpID/AgentID/Secret、HTTPS 回调/可信域名、Core `000005_admin_sso` migration、员工导入和 `admin_identity` 预置仍待部署联调。
-- 本轮实际验证：Docker 前置通过；`go test ./...`、`go build ./...`、`scripts/verify.ps1 -Mode all`、前端 `pnpm typecheck`、`pnpm lint`、`pnpm test`（5 文件/13 测试）和 `pnpm build`（admin-web、employee-web）均通过。未执行真实微信/企业微信平台调用，也未执行迁移、清库或破坏性 Volume 操作。
+- 本轮实际验证：Docker 前置通过；`go test ./...`、`go build ./...`、`scripts/verify.ps1 -Mode all`、前端 `pnpm typecheck`、`pnpm lint`、`pnpm test`（5 文件/13 测试）和 `pnpm build`（admin-web、employee-web）均通过。新增企业微信小程序 `jscode2session` httptest 和独立 Edge 会话测试均包含在全仓验证中。未执行真实微信/企业微信平台调用，也未执行迁移、清库或破坏性 Volume 操作。
 
 ## 2026-09-02 真实身份接入骨架与最终边界
 
 - 已实现个人微信/企业微信真实 Provider 适配器：Core 服务端可在配置开启后调用个人微信 `code2Session`、企业微信 `gettoken/getuserinfo`，并把外部身份映射到同一个 `Staff`；开发环境默认仍使用显式 `mock:<subject>`，真实密钥不进入客户端、日志或仓库。
-- 已实现员工原生小程序壳：`app.json` 注册登录、任务、任务详情和账号页；个人微信使用 `wx.login` 一次性 code，企业微信支持 OAuth/H5 或容器注入 code；工号密码登录和绑定流程保持可用。
+- 已实现两个员工原生小程序壳：个人微信 `employee-miniapp` 使用 `wx.login` 一次性 code，企业微信 `employee-wecom-miniapp` 使用独立的企业微信原生登录适配；两者均注册登录、任务、任务详情和账号页，工号密码登录和绑定流程保持可用。
+- 当前前端边界固定为四个独立客户端：管理后台 Web、员工 Web、个人微信小程序和企业微信小程序；两个小程序独立发布、独立使用平台登录和客户端标识，但最终绑定到同一个项目员工 `Staff`。
+- 项目员工数据库独立于企业现有 HR/员工数据库；管理后台是员工新增、停用、密码重置、团队/区域/分工组归属和身份绑定的唯一管理入口。当前已有人员查询，管理写接口与受控导入仍待下一业务切片，尚未把空壳页面描述为已完成。
 - 已实现管理端 SSO 前端 callback 适配与 Core 企业微信直连管理会话服务：生成并校验 state，回调只交换一次性 code，不把 Core JWT 放入 URL；Core 已有 `admin_identity`/`admin_sso_state`/`admin_session` 和 `/api/v1/admin/auth/sso/*` 路由。当前部署不依赖 OIDC，具体企业微信应用配置、管理员预置和生产联调仍待完成。
-- 已补充 [`frontend/docs/identity-provider-integration.md`](../frontend/docs/identity-provider-integration.md) 和架构/前后端交接记录，明确个人微信需要原生小程序入口、企业微信可用 H5/OAuth、管理端 SSO 不需要小程序。
+- 企业微信员工小程序已使用独立的 `jscode2session` Provider 路径；浏览器企业微信 OAuth 的 `getuserinfo` 不再复用来兑换小程序 code，Edge 也已允许独立客户端会话并拒绝客户端/Provider 错配。
+- 已补充 [`frontend/docs/identity-provider-integration.md`](../frontend/docs/identity-provider-integration.md) 和架构/前后端交接记录，明确个人微信和企业微信使用两个独立小程序入口，管理端 SSO 不需要小程序；项目员工库独立于企业现有 HR/员工数据库。
 - 验证结果：Docker 前置检查在授权环境通过；`go test ./...`、前端 `pnpm typecheck`、`pnpm lint`、`pnpm test`（5 文件/13 测试）和 `pnpm build`（admin-web、employee-web）均通过。真实微信/企业微信和管理端 SSO 线上调用未执行，原因是尚未配置生产凭据、HTTPS 域名和管理员预置。
 
 ## 2026-08-10 Architecture v2 重构启动
@@ -436,3 +450,152 @@
 - 新增 Core `migrations/core/mysql/000005_admin_sso.up.sql`/`.down.sql`、`docs/adr/ADR-011-admin-sso-and-management-read-model.md`，并增加 adminauth/adminquery 单元测试。
 - 本轮 Docker 前置检查成功，CLI 为 `C:\Users\yuanfengleeeeee\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe`。第一次全量测试因默认 Go cache 权限被拒绝退出 1，切换到被 `.gitignore` 忽略的 `.tmp\\gocache-handoff` 后 `go test ./...` 与 `go build ./...` 均成功。
 - 最终 `scripts/verify.ps1 -Mode all` 通过，包含全量 Go 测试、构建、Compose config 和 `git diff --check`。Core `000005_admin_sso` 尚未应用，真实 OIDC/IAM、管理员预置、管理端完整业务 UI、双副本故障和性能门禁仍待后续。
+
+## 2026-09-04 前端分页实现与剩余任务排序
+
+- 已完成前端服务端分页接入：管理端任务、航班、异常、组织/班组、人员、模板、规则、Assignment、管理员身份列表均传递 `page/page_size` 并使用返回的 `total`；任务历史按 completed/cancelled 两个 Core 状态分区分页合并。员工 Web、个人微信小程序和企业微信小程序的历史/通知也已提供分页翻页。
+- 新增共享 `@flight/ui` `ListPager`，分页切换使用稳定的服务端元数据，筛选条件回到第一页，并通过 `AbortController` 取消过期请求；Edge 员工任务列表继续按完整 Projection 快照契约读取，不改成普通分页。
+- 本轮验证前已执行 `scripts/ensure-docker.ps1` 并通过；`frontend` 的 `pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（14/14）、`pnpm.cmd build` 和 `pnpm.cmd build:miniapps` 均通过。首次受限沙箱的 esbuild 父目录访问错误已在提升权限下复跑通过，不是源码失败。
+- 当前按依赖顺序的明确待办：① 100+ 数据分页浏览器/Contract 验收；② 区域/班组引用选择器远程分页搜索；③ positions/capabilities 前端页面；④ 人员状态看板与状态历史；⑤ 管理端 events/audit/scopes/diagnostics 及通知投递查询；⑥ 真实 Provider、平台通知、管理 SSO/管理员预置/HTTPS 发布；⑦ 小程序正式发布、CI、故障恢复、多副本和性能门禁。详见 `docs/frontend-acceptance-gap-audit.md`。
+
+## 2026-09-03 完整管理主干与企业微信小程序实时实现
+
+- Core 已新增管理 Service、HTTP Handler 和 MySQL 事务适配器，覆盖 Area、Team、Personnel/密码、TaskTemplate、Flight 到达/离港/取消、AdminIdentity 的维护，并接入 RBAC、层级/状态保护和 Audit；Arrival 仍是 Task 生成入口。
+- Admin Web 已接入组织、航班、人员、模板、Assignment、管理员身份页面；所有页面通过 Core API Client 读写，未加入管理端本地 Mock 作为成功数据。
+- Edge 已新增 `/api/v1/ws/native`，企业微信原生小程序使用 `wx.connectSocket`、realtime ticket 和应用子协议连接；只接收变化提示并重新拉取快照，HTTP Projection 仍是可靠读取/恢复路径。
+- 实际源码验证：`go test ./...` 通过；`go build ./...` 退出码为 0（Go 尝试写全局模块 stat cache 时有权限提示）；前端 `pnpm typecheck`、小程序和 Admin Web TypeScript 检查、`pnpm test`（5 个文件/14 个测试）及 Admin Web build 已通过。
+- Docker 配置没有丢失：提升权限后 `scripts/ensure-docker.ps1 -PassThru` 已确认 Engine ready，`scripts/verify.ps1 -Mode all` 已通过（全量 Go 测试、构建、Compose config、`git diff --check`）；普通受限沙箱只是无法访问用户目录下的 CLI。
+- 当前 `scripts/verify.ps1 -Mode compose-ps` 显示仅 `local-edge-redis-1` 正常运行，Core/Edge MySQL 和 API 尚未启动；尚待在隔离环境应用 `000005_admin_sso`、预置管理员和员工、接入企业微信凭据/通信域名/小程序 endpoint，随后做 HTTP/SQL、实时、故障恢复和性能门禁。通知/异常/历史/规则/报表仍需先冻结公开 API。
+
+## 2026-09-03 地面代理业务种子与双入口在线验收
+
+- 将业务数据和前端示例统一到航空客运地面代理：民用航空客运销售代理、航空旅客运输地面服务和航空信息咨询；覆盖国内/国际值机（含自助值机）、进出港、中转、配载平衡、特殊旅客、不正常航班、行李地面派送和航班地面保障，明确不包含维修、客舱业务。
+- 新增并成功运行可重复命令：`go run ./cmd/seed -config configs/config.v2.yaml -target all -seed 20260903 -personnel 96 -flights 72 -prefix DEMO -password Flight123!`。精确 DEMO 种子包含 5 个区域、11 个服务组、96 名员工、96 个密码凭据、个人微信/企业微信各 24 个绑定、4 个管理身份、72 个任务、11 种任务类型；任务状态分布为 assigned 15、awaiting_confirmation 15、cancelled 14、completed 14、in_progress 14。
+- Edge 隔离库包含 57 条任务投影、19 条通知和 33 条员工 projection cursor。Core/Edge 隔离容器为 `devseed-core-mysql-1`（3310）和 `devseed-edge-mysql-1`（3311）；此前接口联调的额外记录保留未清理。
+- 通过当前源码 Core `:8083` 实测权限：manager 全局 72 条、team leader 7 条、area leader 18 条、staff 本人 2 条；所有响应均为 `application/json; charset=utf-8`。通过当前源码 Edge `:8084` 实测工号密码、个人微信 Mock Provider、企业微信 Mock Provider 均 200，三者返回同一个 Staff `df463e73-171d-56a0-8fcd-26e361bf560c`；个人微信与企业微信均读取 2 条任务、revision 5 的同一快照。
+- 本轮先运行 `scripts/ensure-docker.ps1`，随后 `go test ./...`、`go build ./...`、前端 `pnpm lint`、`pnpm typecheck`、`pnpm test`（5 个测试文件/14 个测试）、`pnpm build` 和 `scripts/verify.ps1 -Mode all` 均通过。没有执行破坏性数据库操作；生产真实微信/企业微信凭据、域名、线上 SSO 和平台发布仍未验收。
+
+## 2026-09-03 隔离运行时完整任务链路验收与种子修复
+
+- Docker CLI 配置已确认有效：`scripts/ensure-docker.ps1 -PassThru` 成功解析 `C:\Users\yuanfengleeeeee\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe`，Docker Engine 为 ready；此前失败是受限沙箱无法访问用户目录，不是 CLI 地址丢失。
+- 隔离 Compose 项目 `local-acceptance` 使用独立 Core/Edge MySQL（宿主端口 3320/3321）和 Edge Redis（6381），Core `000001`—`000005`、Edge `000001`—`000006` migration 已应用。已有 `devseed`、`flight-*` 和 `local-*` 容器/Volume 未停止、删除或重置。
+- 完成当前源码 Core API、Edge API、Worker 的真实 HTTP/SQL 联调：员工登录、Edge 任务快照、稳定 Command ID、Worker 投递、Core Inbox、Task/Assignment/Personnel 状态变更、Core Outbox、Edge Inbox/Projection 均已验证。
+- 发现并修复 `internal/devseed/seed.go` 的两处一致性问题：活跃任务复用员工导致 `reserved/busy/idle` 覆盖，以及历史任务 Outbox 错发为 `task.assigned.v1`。现在活跃分配不重叠，事件映射为 assigned/accepted/completed/cancelled，并可修复旧 DEMO 种子 Outbox。
+- 真实验收结果：目标员工任务 `assigned → in_progress → completed`，Edge `sync_version 2 → 3 → 4`；两个命令 Core Inbox 为 `applied`，Core Outbox 为 `sent`，Edge Inbox 无失败事件；同一完成命令重放返回 `duplicate=true` 且无重复副作用。
+- 修复后再次运行 `scripts/verify.ps1 -Mode all` 通过，包含全量 Go 测试、构建、Compose config 和 `git diff --check`。完整 Compose 启动仍受 Docker Hub `nginx:1.27-alpine` 拉取 EOF 影响，故当前结论是“源码 + 隔离运行时验收通过”，不是生产部署验收通过。
+- 后续优先级：真实企业微信凭据/通信域名/小程序正式 endpoint 与发布、Gateway 双副本和 Redis/网络/Worker 重启故障门禁、代表性负载 p50/p95/p99；通知/异常/历史/规则/报表等公开 API 仍需先冻结契约再实现。
+
+## 2026-09-03 Web 设计基线 v1 开始执行
+
+- 按“先 Web、后小程序”的路线进入前端开发阶段；新增 `frontend/docs/web-design-system.md`，冻结航空客运地面代理场景下的视觉主张、航班身份条带、状态轨、页面地图、角色可见性、组件库存和响应式/无障碍要求。
+- `admin-web` 与 `employee-web` 增加共享 `--ops-*` 语义 Token；管理端任务详情采用状态强调条，员工端任务卡根据服务端 Projection 状态显示 amber/blue/teal/red 状态轨。
+- Web 导航增加 `aria-current="page"`，不改变任何后端 Scope 或同步语义；随后按 W3 → M0 进入原生小程序实现。
+
+## 2026-09-03 双小程序页面实现
+
+- 新增 `frontend/docs/mobile-design-system.md`，冻结原生页面地图、登录流程、状态/可靠性语义和触控设计基线。
+- 个人微信小程序补齐通知、历史、异常页面，增加个人微信快捷登录与原生实时刷新；补齐五入口底部导航。企业微信小程序已有同等业务页面，并统一任务状态轨视觉。
+- 个人微信 Edge 原生适配器增加通知、历史、异常、Realtime ticket 和 `wx.connectSocket`；两个小程序 tsconfig 现在纳入 `app.ts` 和 `pages`，确保页面源码也进入静态检查。
+
+## 2026-09-03 运行治理完整业务主干
+
+- Core 新增任务历史聚合读模型和管理端异常/报表查询；Edge 新增员工历史、通知列表/已读和异常 Command 接收。Core 仍是任务、Assignment、Personnel、异常事实的唯一事实源。
+- 新增 Core migration `000006_task_exception`，在隔离 `local-acceptance` Core 数据库上完成 status/up；没有执行 migration down、DROP、TRUNCATE 或 Volume 清理。
+- 员工异常真实链路已验证：Edge 接收 `pending` → Worker 投递 → Core Command `confirmed` → Core 异常为 `open`；管理端 `acknowledged` → `resolved` 成功，终态重开返回 HTTP 400，Audit 中保留员工上报及两次管理更新。
+- 实时隔离 HTTP 验收已验证：任务历史、通知列表、通知已读、报表日期过滤、异常查询与管理更新均使用当前源码和隔离数据库完成；报表包含任务/航班/Assignment/人员/异常状态计数。
+- 验证结果：Docker preflight 通过；`scripts/verify.ps1 -Mode all` 通过；`pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（14/14）和 `pnpm.cmd build` 通过；文档及最后代码调整后 `git diff --check` 也通过。
+- 未完成项保持明确：真实平台凭据/域名与正式发布、平台通知 Provider、Gateway 完整 Compose 启动、双副本/网络分区/重启故障门禁及代表性性能基线。完整 Compose 当前仍受 Docker Hub `nginx:1.27-alpine` 拉取 EOF 影响。
+
+## 2026-09-03 Web 页面启动与小程序发布包调试
+
+- 管理端 Web 已启动于 `http://127.0.0.1:4174/`，使用显式开发 `manager` Actor 从真实 Core API 读取 50 条任务；员工端 Web 已启动于 `http://127.0.0.1:4175/login`，等待使用 DEMO 员工账号试用。Core `:8081`、Edge `:8082` 和 Worker 使用现有隔离 DEMO 数据运行，未修改业务卷。
+- 前端新增 `pnpm build:miniapps` 和 `scripts/build-miniapps.mjs`，将个人微信、企业微信 TypeScript 入口及 workspace 依赖分别打包到 `frontend/dist/employee-miniapp`、`frontend/dist/employee-wecom-miniapp`；构建时注入 `MINIAPP_EDGE_API_BASE_URL`，发布模式拒绝占位域名。
+- 两个小程序新增 `project.config.json`、可替换 Edge 地址和独立发布包检查；本地构建使用 `http://127.0.0.1:8082` 已通过，包内无未解析 `@flight/*` 依赖、未注入占位地址，页面/配置文件均为 UTF-8。
+- 已安装并校验腾讯微信开发者工具 Windows 64 位稳定版 2.02.2608060，数字签名有效；工具窗口已启动，但首次自动化导入仍需用户在工具中扫码登录。未代替用户操作扫码、真实 AppID 或上传发布。
+- 本轮复核通过：Docker preflight、`pnpm.cmd lint`、`pnpm.cmd typecheck`、`pnpm.cmd test`（14/14）、`pnpm.cmd build` 和小程序 bundle 检查。下一步是用户扫码后打开两个 `dist` 工程进行模拟器/真机预览，再配置真实 HTTPS Edge 域名和对应 AppID 做体验版上传。
+
+## 2026-09-03 员工 Web 登录 invalid_json 修复
+
+- 根因是 `configs/config.v2.yaml` 的 Core/Edge MySQL 密码为 `change-me-local`，而当前开发数据库容器使用 `change-me`；Core/Edge 启动时数据库连接为空，Edge 未注册身份路由，未注册路由返回 `404 text/plain`，前端因此显示 `invalid_json`。
+- 已将本地配置中的 Core/Edge 数据库密码统一为 `change-me`，未执行迁移回滚、清库、Volume 删除或其他破坏性操作；Edge、Core 健康检查和当前隔离 DEMO 数据保持可用。
+- 真实验证：直连 Edge 登录和员工 Web `/edge-api` 代理均返回 `200 application/json; charset=utf-8`，`DEMO0001 / Flight123!` 成功签发员工会话；员工 Web 任务请求能够继续使用该会话。
+- 验证结果：Docker preflight（提升权限）通过；前端 `pnpm.cmd lint`、`pnpm.cmd typecheck`、`pnpm.cmd test`（14/14）和 `pnpm.cmd build` 通过；`git diff --check` 通过（仅保留既有 LF/CRLF 提示）。
+
+## 2026-09-03 正式验收前边界收敛
+
+- 航班管理改为只读：移除管理端航班新增、到达、离港、取消写接口；增加 `internal/integration/flight.Provider` 接口位置、航班来源字段和受 `X-Flight-Source-Key` 保护的外部到达事件入口。开发种子仍可写入 `development` 来源数据，供本地验收使用。
+- 岗位能力匹配后端已完成：候选计算校验班组/区域、岗位编码、能力、人员状态、启用状态、主成员关系和时间冲突，并保存匹配快照；本轮已补齐独立岗位/能力字典 CRUD，前端 `/positions` 已接入分页字典工作台。
+- 员工与保障人员新增/更新已增加服务端和 OpenAPI/前端一致的工号、岗位编码、能力编码校验；当前采用工号 4–12 位纯数字的产品假设，并保留数据库唯一约束。
+- Core 管理集合、Edge 员工历史和通知均改为数据库分页；管理端首页改用报表聚合接口，避免通过多组列表接口拼统计。航班页已有翻页，其余部分管理页的页码控件仍需在大数据验收范围内补齐。
+- 前端文档路由已同步当前扁平路由；新增 `docs/frontend-acceptance-gap-audit.md`，明确真实航班 Provider、状态/事件/审计/Scope/诊断工作台、生产身份和发布配置等未完成项。
+
+验证结果：修正迁移发现测试后，`scripts/verify.ps1 -Mode all` 通过；最终前端 `pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（14/14）、`pnpm.cmd build` 和 `pnpm.cmd build:miniapps` 均通过。未执行破坏性数据库操作，也未提交或推送 Git。
+
+数据库状态：使用 `configs/config.v2.yaml` 对本地 Core 数据库执行非破坏性 `go run ./cmd/migrate -target core -command up`；`000001` 至 `000007` 当前全部为 applied。
+
+## 2026-09-04 管理端分页验收准备与引用选择器实现
+
+- Core 管理端区域/班组查询新增 `q` 服务端搜索参数，按编码/名称匹配并保留统一 `page/page_size/total` 契约；同时修正管理列表 Handler 的嵌套响应，使实际响应与 OpenAPI/frontend contracts 的 `data.items` 结构一致。
+- Admin Web 人员、模板和组织页面的区域/班组选项改为远程分页搜索，输入防抖 250ms 并用 `AbortController` 取消过期请求；人员状态历史增加服务端分页和翻页控件。
+- 新增 `frontend/e2e/admin-pagination.spec.ts`，在显式启用大数据和测试 Actor 后检查管理集合分页元数据、UTF-8 Content-Type、第二页数据差异，并可选验证管理端任务工作台的页码切换。
+- 使用 `go run ./cmd/seed -config configs/config.v2.yaml -target all -personnel 160 -flights 120 -prefix PAGE -seed 20260904 -password Flight123!` 追加可重复的大数据夹具；没有清理或重置既有数据库数据。
+- Docker preflight 已通过。当前源码编译的临时 Core `:8084` 已在线验证区域/班组搜索、扁平分页响应和 UTF-8 响应头；既有 `:8081` Core 进程未擅自重启，因此前端现有代理要使用该修复需在用户确认后滚动替换运行进程。
+- 本轮剩余顺序更新为：①补管理端浏览器分页首/末页、空结果和数据变化后的页码修正；②补岗位/能力引用保护和角色权限验收；③增强状态/事件/审计/诊断检索；④真实 Provider/平台通知/管理员 SSO/HTTPS 与预置；⑤小程序发布、CI、故障恢复和性能门禁。
+- 追加验证结果：Docker preflight、`scripts/verify.ps1 -Mode all`、`go test ./...`、`go build ./...`、前端 `pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（14/14）和 `pnpm.cmd build` 均通过；`E2E_LARGE_DATA=true E2E_CORE_API_URL=http://127.0.0.1:8084 pnpm.cmd exec playwright test e2e/admin-pagination.spec.ts --grep 管理端大数据接口` 通过（1/1）。管理端浏览器用例仍需显式设置 `E2E_ADMIN_UI=true` 并提供可用管理端会话。
+
+## 2026-09-04 管理端主数据维护闭环
+
+- 为 `admin-web` 的人员档案、任务模板、区域/班组和管理身份列表增加编辑入口，分别调用已存在的 Core `PATCH` 接口；人员仍支持启停用和重置密码，模板/组织/身份仍支持启停用。
+- 管理身份创建已支持为 `leader` 选择区域或班组 Scope；已有身份编辑现支持显示名称、角色、全局 Scope 以及区域/班组 public ID 明细。Core 返回 public ID 供前端编辑，内部数字 ID 仍只用于服务端授权。
+- 当前编辑入口使用原生确认输入完成主功能闭环，视觉优化阶段再替换为结构化表单和远程引用选择器。
+- 改动后验证：Docker preflight、前端 `pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（14/14）和 `pnpm.cmd build` 通过；未执行破坏性数据库操作、未重启既有 `:8081` Core 进程、未提交或推送。
+
+## 2026-09-04 管理端分页边界与运维筛选
+
+- 共享 `@flight/ui` `ListPager` 新增首页/末页，并在服务端总数变化导致页码越界时自动回到有效页；Playwright 用例从位置索引改为按按钮名称定位，覆盖首页 → 下一页 → 末页 → 首页返回。
+- 人员状态页新增区域、班组和工作状态筛选；事件页新增投递状态、事件类型、航班 public ID、开始/结束时间筛选；审计页新增操作者、动作、资源类型、开始/结束时间筛选。浏览器端 datetime-local 值会转换为 RFC3339 后再请求 Core。
+- 真实浏览器验收：临时本机管理端 4176 通过 Vite `/core-api` 代理连接当前源码 Core 8084，任务分页用例通过（1/1）；管理集合分页/UTF-8 Contract 通过（1/1）。临时 4176 验收服务已关闭，既有 4174/8081 未动。
+- 验证结果：Docker preflight、前端 typecheck、lint、test（14/14）和 build 通过；未执行破坏性数据库操作、未提交或推送。
+
+## 2026-09-04 管理身份 Scope 编辑契约
+
+- Core 管理身份响应新增 `area_public_ids` 和 `team_public_ids`；查询时由内部 Scope 数字 ID解析为区域/班组 public ID，更新时在同一事务中解析并保存，保持授权使用内部 ID、前端写入使用 public ID 的边界。
+- `api/core/openapi.yaml` 和 `@flight/contracts` 已同步管理身份响应；Admin Web 的既有身份编辑支持角色、显示名称、全局 Scope 及逗号分隔的区域/班组 public ID，Core 继续负责角色与 Scope 校验。
+- 本轮变更后的最终验证已通过：Docker preflight、Go 全量测试/构建、前端 typecheck/lint/test（14/14）/build、统一 `scripts/verify.ps1 -Mode all` 和 `git diff --check`；未重启既有 `:8081` Core，未执行数据库清理。
+
+## 2026-09-07 管理端角色感知入口与联调收口
+
+- Admin Web 已增加基于 Core Scope 的角色感知导航和路由保护：`admin` 可见并操作管理端主数据维护；`manager`、`leader` 的页面可见范围按 Core RBAC 的读取权限收敛，队长可读取自己的 Scope 页面；Core 仍是最终授权边界，前端隐藏按钮不替代服务端鉴权。
+- Admin Web 的组织、人员、任务模板、岗位/能力字典写操作入口已按 `area:manage`、`team:manage`、`personnel:manage`、`template:manage`、`position:manage`、`capability:manage` 过滤，并通过 `AbortController` 获取/刷新当前 Scope，避免权限请求过期覆盖新状态。
+- 对联调中暴露的后端契约不一致做了最小修正：员工开始任务当前产生 `task.started.v1`；MySQL 员工 Command 仓储补齐 Assignment 收据确认和任务同步版本 CAS 更新；迁移测试期望同步至 Core 000010、Edge 000007；任务创建测试同步当前 `pending_dispatch` 状态。没有执行破坏性数据库操作。
+- 本轮验证实际通过：Docker preflight、`go test ./...`、`go build ./...`、前端 `pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（14/14）、`pnpm.cmd build`、`scripts/verify.ps1 -Mode all` 和 `git diff --check`。
+- 后续仍属于发布/验收工作：真实微信/企业微信凭据与 HTTPS 域名、管理员正式预置、完整管理端浏览器角色矩阵、故障注入/多副本/性能门禁和最终视觉收口；当前没有把这些内容宣称为完成。
+
+## 2026-09-07 自动派发、收件确认与受控异常流程
+
+- 按已确认的业务流程完成代码调整：航班到达在 Core 事务内生成 `pending_dispatch` 任务；事务成功后由 `AutomaticTaskDispatcher` 从候选快照中选择人员并复用受限 machine principal 调用确认事务，成功后正常进入 `assigned` 并发布 `task.assigned.v1`。当前选择器是可替换的稳定排序基线，公平、班次负载、休息时间等生产排班规则仍需业务评审后替换。
+- Assignment 新增收件握手状态 `receipt_status/received_at`。员工新增 `received`（我已收到）和 `start`（开始执行）命令；收件只证明通知到达，不是同意/拒绝，员工不能拒绝任务。旧 `accept` 入口保留为 start 兼容别名；完成仍按原有 Core 状态机执行。
+- Core/Edge 新增 migration `000010_task_dispatch_receipt`、`000007_task_receipt_projection`，补齐 Assignment/Projection 收件字段及 `pending_dispatch` 状态；Edge 事件投影、员工 Web、个人微信小程序、企业微信小程序均显示并同步收件状态。
+- 员工异常入口明确为受控申请，新增保障冲突、航班延误、航班取消、突发事件等类别；异常通过持久化 Command 进入 Core，由 manager/admin 按版本、History、Audit、Outbox 审批处理，leader 只能报告和跟进，授权外部航班源只更新航班事实，客户端不能直接改派、暂停或取消任务。管理端任务页补齐待自动派发和兼容状态展示。
+- 本轮已实际通过 `gofmt`、Docker 前置检查、`go test ./...`、`go build ./...`、前端 `pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（5 个文件/14 个测试）、`pnpm.cmd build`、`pnpm.cmd build:miniapps`、统一 `scripts/verify.ps1 -Mode all` 和 `git diff --check`；未应用新 migration，未执行破坏性数据库操作。
+- 随后补齐管理端任务详情的受控取消入口：`assigned`/`in_progress` 非终态任务可由有权限的管理角色提交带原因的取消，后端沿用既有版本校验、释放人员、History、Audit、Outbox 和幂等事务；`completed`/`cancelled` 仍为只读。前端回归验证再次通过 typecheck、lint、14/14 测试和生产构建。
+- 员工异常目前是持久化申请，不会把“提交异常”误变成员工拒绝或客户端直接改派；当前已交付的管理处置动作是受控补派和取消，暂停/改派的最终规则继续等待排班算法与变更命令契约冻结后接入。
+
+## 2026-09-07 Task change approval, source health and automatic reallocation
+
+- Added Core migration `000011_task_change_request` and the task-change application/SQL adapter. Exception commands can create a pending request in the same Core transaction; direct task edits are not exposed. `pause`, `reassign`, `reschedule`, `cancel` and `resume` are the only actions. Only `manager` or `admin` can approve/reject; leader and supervisor can report/observe but cannot apply a change.
+- Added the frozen v1 dispatch rule: enabled personnel must match the task area/team, exact position and capability, be idle, have an active primary team membership and have no same-time active assignment. Ordering is oldest personnel state change, then candidate public ID. Automatic dispatch and timeout reallocation both reuse this rule and the candidate snapshot.
+- Added bounded receipt-timeout reallocation in Worker, default 300 seconds. The Core transaction locks and rechecks the assignment, releases the old reservation, selects a remaining eligible candidate and emits a new assignment event. If none remains, it keeps the assignment/task visible and reports a shortage; it never treats missing receipt as employee refusal or silently cancels the task.
+- Added Core migration `000012_flight_source_health`, provider health recording and `GET /internal/integration/v1/flight-source/health`. Source states are `fresh`, `stale`, `fallback` and `failed`; durable pre-synced flight facts remain usable when an external provider fails. Delayed external events update schedule facts and emit a schedule-change event; task changes still require manager approval.
+- Added Core migration `000013_supervisor_role` and scoped management SSE at `GET /api/v1/realtime/management`. Admin/manager/leader/supervisor receive only the events allowed by their global/area/team scope; `Last-Event-ID` resumes from the durable Outbox cursor, while clients recover facts with paginated APIs.
+- Shared employee contracts and all three employee clients now expose optional controlled actions on exception reports. Category suggestions only prefill `reassign` or `cancel`; pause/reschedule/resume remain explicit requests, and reschedule requires a proposed time. None of these client fields mutates a task before manager/admin review.
+- OpenAPI and `docs/task-crud-contract-v2.md` now describe the change-request state machine, three handshake layers, fallback semantics, role boundary and timeout behavior. No migration was applied and no destructive database action was executed in this continuation.
+- 本轮实际验证已完成：Docker preflight 通过；自动派发“首选候选冲突后回退下一候选”用例通过；`go test ./...`、`go build ./...`、前端 `typecheck`、`lint`、`test`（5 个文件/15 个测试）、`build`、`build:miniapps` 和 `scripts/verify.ps1 -Mode all` 均通过；`git diff --check` 无错误（仅有 Git 的 LF→CRLF 提示）。未应用新 migration，未执行破坏性数据库操作、提交或推送。
+
+## 2026-09-07 管理端角色矩阵浏览器验收
+
+- 新增 `frontend/e2e/admin-role-matrix.spec.ts`，可在 `E2E_ROLE_MATRIX=true` 并提供 `admin/manager/leader` 三个临时 Web 实例时重复验收导航、直接路由、Scope 卡片和主数据写入口。
+- 使用隔离 `role-matrix` 数据库卷、当前源码 Core API 和三个 Vite 角色实例完成真实浏览器验收：`admin` 完整可见并可维护；`manager` 隐藏用户与角色且主数据只读；带团队/区域 Scope 的 `leader` 可读取人员和任务，但主数据只读，并隐藏审计、诊断和用户与角色。
+- 验收发现并修复用户与角色页面在 `area_ids/team_ids` 为 JSON `null` 时的白屏；Core 现在将 Scope/管理身份空数组稳定编码为 `[]`，前端同时保留空值兼容。修复后 admin 用户与角色页面可正常显示，Scope 页面三个角色均正常。
+- 实际浏览器用例通过：`E2E_ROLE_MATRIX=true E2E_ADMIN_ROLE_URL=http://127.0.0.1:4176 E2E_MANAGER_ROLE_URL=http://127.0.0.1:4174 E2E_LEADER_ROLE_URL=http://127.0.0.1:4178 pnpm.cmd exec playwright test e2e/admin-role-matrix.spec.ts`，结果 1/1。
+- 修复后再次通过 Docker preflight、Go 全量测试/构建、前端 typecheck/lint/test（14/14）/build、`scripts/verify.ps1 -Mode all` 和 `git diff --check`。未执行表单提交、数据库清理、迁移回滚或 Git 提交推送。

@@ -234,7 +234,7 @@ func (s *Service) ValidatePrincipal(ctx context.Context, principal security.Prin
 }
 
 func (s *Service) issueSession(ctx context.Context, value sharedIdentity.Staff, client string, now time.Time) (LoginResponse, error) {
-	if s == nil || s.sessions == nil || s.issuer == nil || strings.TrimSpace(value.PublicID) == "" || (client != "employee-miniapp" && client != "employee-web") {
+	if s == nil || s.sessions == nil || s.issuer == nil || strings.TrimSpace(value.PublicID) == "" || (client != "employee-miniapp" && client != "employee-wecom-miniapp" && client != "employee-web") {
 		return LoginResponse{}, fmt.Errorf("invalid employee session subject")
 	}
 	absoluteExpiresAt := now.Add(s.absoluteTTL)

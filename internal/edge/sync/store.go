@@ -30,11 +30,44 @@ type TaskProjection struct {
 	PlannedAt          time.Time `json:"planned_at"`
 	// Status is retained for the Foundation probe and old clients. Business
 	// events use BusinessStatus, but both fields are kept aligned on write.
-	Status         string    `json:"status,omitempty"`
-	BusinessStatus string    `json:"business_status,omitempty"`
-	Message        string    `json:"message"`
-	SyncVersion    uint64    `json:"sync_version"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	Status         string     `json:"status,omitempty"`
+	BusinessStatus string     `json:"business_status,omitempty"`
+	ReceiptStatus  string     `json:"receipt_status,omitempty"`
+	ReceivedAt     *time.Time `json:"received_at,omitempty"`
+	Message        string     `json:"message"`
+	SyncVersion    uint64     `json:"sync_version"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type NotificationProjection struct {
+	PublicID         string    `json:"public_id"`
+	EmployeePublicID string    `json:"employee_public_id"`
+	Title            string    `json:"title"`
+	Message          string    `json:"message"`
+	Status           string    `json:"status"`
+	SyncVersion      uint64    `json:"sync_version"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type NotificationFilter struct {
+	EmployeePublicID string
+	Status           string
+	Page             int
+	PageSize         int
+}
+
+// TaskHistoryFilter is separate from TaskSnapshot on purpose: the task list
+// is an authoritative employee-scoped recovery snapshot, while history is a
+// paged read model and must not load every projection into application memory.
+type TaskHistoryFilter struct {
+	EmployeePublicID string
+	Status           string
+	Page             int
+	PageSize         int
+}
+
+type TaskHistoryStore interface {
+	ListTaskHistory(context.Context, TaskHistoryFilter) ([]TaskProjection, int64, error)
 }
 
 type InboxRecord struct {
@@ -87,6 +120,18 @@ type TaskSnapshotProvider interface {
 	ListTaskSnapshot(ctx context.Context, employeePublicID string, now time.Time) (TaskSnapshot, error)
 }
 
+// NotificationStore is optional so the foundation MemoryStore and existing
+// projection-only test doubles remain source-compatible. Durable Edge stores
+// implement it for the employee notification read surface.
+type NotificationStore interface {
+	ListNotifications(context.Context, NotificationFilter) ([]NotificationProjection, int64, error)
+	MarkNotificationRead(context.Context, string, string) error
+}
+
+type NotificationProjectionWriter interface {
+	UpsertNotificationProjection(context.Context, NotificationProjection) error
+}
+
 type EventProjection func(context.Context, sharedEvent.EventEnvelope) error
 
 type Store interface {
@@ -117,10 +162,11 @@ type MemoryStore struct {
 	commands            map[string]CommandRecord
 	projections         map[string]TaskProjection
 	projectionRevisions map[string]uint64
+	notifications       map[string]NotificationProjection
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{inbox: make(map[string]InboxRecord), commands: make(map[string]CommandRecord), projections: make(map[string]TaskProjection), projectionRevisions: make(map[string]uint64)}
+	return &MemoryStore{inbox: make(map[string]InboxRecord), commands: make(map[string]CommandRecord), projections: make(map[string]TaskProjection), projectionRevisions: make(map[string]uint64), notifications: make(map[string]NotificationProjection)}
 }
 
 func (s *MemoryStore) ApplyEvent(ctx context.Context, envelope sharedEvent.EventEnvelope, project EventProjection) (bool, error) {
@@ -326,6 +372,89 @@ func normalizeTaskProjection(projection TaskProjection) (TaskProjection, error) 
 	return projection, nil
 }
 
+func (s *MemoryStore) ListNotifications(ctx context.Context, filter NotificationFilter) ([]NotificationProjection, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := make([]NotificationProjection, 0)
+	for _, value := range s.notifications {
+		if filter.EmployeePublicID != "" && value.EmployeePublicID != filter.EmployeePublicID {
+			continue
+		}
+		if filter.Status != "" && value.Status != filter.Status {
+			continue
+		}
+		values = append(values, value)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].UpdatedAt.Equal(values[j].UpdatedAt) {
+			return values[i].PublicID < values[j].PublicID
+		}
+		return values[i].UpdatedAt.Before(values[j].UpdatedAt)
+	})
+	total := int64(len(values))
+	page, pageSize := normalizeNotificationPagination(filter.Page, filter.PageSize)
+	start := (page - 1) * pageSize
+	if start >= len(values) {
+		return []NotificationProjection{}, total, nil
+	}
+	end := start + pageSize
+	if end > len(values) {
+		end = len(values)
+	}
+	return append([]NotificationProjection(nil), values[start:end]...), total, nil
+}
+
+func (s *MemoryStore) MarkNotificationRead(ctx context.Context, employeePublicID, publicID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.notifications[publicID]
+	if !ok || value.EmployeePublicID != employeePublicID {
+		return ErrNotFound
+	}
+	value.Status = "read"
+	value.UpdatedAt = time.Now().UTC()
+	s.notifications[publicID] = value
+	return nil
+}
+
+func (s *MemoryStore) UpsertNotificationProjection(ctx context.Context, notification NotificationProjection) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if notification.PublicID == "" || notification.EmployeePublicID == "" || notification.SyncVersion == 0 {
+		return fmt.Errorf("notification public_id, employee_public_id and sync_version are required")
+	}
+	if notification.UpdatedAt.IsZero() {
+		notification.UpdatedAt = time.Now().UTC()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if previous, ok := s.notifications[notification.PublicID]; ok && previous.SyncVersion > notification.SyncVersion {
+		return nil
+	}
+	s.notifications[notification.PublicID] = notification
+	return nil
+}
+
+func normalizeNotificationPagination(page, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
 func sameTaskProjection(left, right TaskProjection) bool {
 	return left.PublicID == right.PublicID &&
 		left.AssignmentPublicID == right.AssignmentPublicID &&
@@ -336,8 +465,17 @@ func sameTaskProjection(left, right TaskProjection) bool {
 		left.PlannedAt.Equal(right.PlannedAt) &&
 		left.Status == right.Status &&
 		left.BusinessStatus == right.BusinessStatus &&
+		left.ReceiptStatus == right.ReceiptStatus &&
+		timesEqual(left.ReceivedAt, right.ReceivedAt) &&
 		left.Message == right.Message &&
 		left.SyncVersion == right.SyncVersion
+}
+
+func timesEqual(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Equal(*right)
 }
 
 func (s *MemoryStore) ListTaskProjections(ctx context.Context, employeePublicID string) ([]TaskProjection, error) {
@@ -346,6 +484,48 @@ func (s *MemoryStore) ListTaskProjections(ctx context.Context, employeePublicID 
 		return nil, err
 	}
 	return snapshot.Items, nil
+}
+
+func (s *MemoryStore) ListTaskHistory(ctx context.Context, filter TaskHistoryFilter) ([]TaskProjection, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := make([]TaskProjection, 0)
+	for _, value := range s.projections {
+		if filter.EmployeePublicID != "" && value.EmployeePublicID != filter.EmployeePublicID {
+			continue
+		}
+		status := value.BusinessStatus
+		if status == "" {
+			status = value.Status
+		}
+		if status != "completed" && status != "cancelled" {
+			continue
+		}
+		if filter.Status != "" && filter.Status != "all" && status != filter.Status {
+			continue
+		}
+		values = append(values, value)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].UpdatedAt.Equal(values[j].UpdatedAt) {
+			return values[i].PublicID > values[j].PublicID
+		}
+		return values[i].UpdatedAt.After(values[j].UpdatedAt)
+	})
+	total := int64(len(values))
+	page, pageSize := normalizeNotificationPagination(filter.Page, filter.PageSize)
+	start := (page - 1) * pageSize
+	if start >= len(values) {
+		return []TaskProjection{}, total, nil
+	}
+	end := start + pageSize
+	if end > len(values) {
+		end = len(values)
+	}
+	return append([]TaskProjection(nil), values[start:end]...), total, nil
 }
 
 func (s *MemoryStore) ListTaskSnapshot(ctx context.Context, employeePublicID string, now time.Time) (TaskSnapshot, error) {

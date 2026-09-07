@@ -27,7 +27,7 @@ $env:E2E_BASE_URL = "http://127.0.0.1:4175"
 pnpm.cmd exec playwright test e2e/employee-task-lifecycle.spec.ts e2e/core-task-scope.spec.ts
 ```
 
-生命周期用例会真实执行 `Accept → Command status confirmed → Complete → 刷新恢复终态`；Scope 用例会验证主任全局可见、正确团队/区域队长可见、错误团队/区域队长返回空列表且详情为 404。所有 JSON 请求和响应使用 UTF-8。
+生命周期用例会真实执行 `received → start → Command status confirmed → complete → 刷新恢复终态`；Scope 用例会验证主任全局可见、正确团队/区域队长可见、错误团队/区域队长返回空列表且详情为 404。所有 JSON 请求和响应使用 UTF-8。
 
 ## Edge 错误契约
 

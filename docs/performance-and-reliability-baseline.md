@@ -44,8 +44,8 @@ Core 事实、Edge Projection 和状态收敛准确
 
 ### 3.1 必须遵守的原则
 
-- 管理端 `admin-web`、员工小程序 `employee-miniapp` 和员工网页版 `employee-web` 都必须把性能作为交互设计的一部分；三个客户端不能因为共享 UI 而引入不必要的动画依赖。
-- Confirm、Cancel、Accept、Complete、Retry 等关键操作必须立即发起请求，不能等待入场动画、过场动画或特效结束。
+- 管理端 `admin-web`、员工网页版 `employee-web`、个人微信小程序 `employee-miniapp` 和企业微信小程序 `employee-wecom-miniapp` 都必须把性能作为交互设计的一部分；四个客户端不能因为共享 UI 而引入不必要的动画依赖。
+- Confirm、Cancel、received、start、complete、Retry 等关键操作必须立即发起请求，不能等待入场动画、过场动画或特效结束。
 - 按钮点击后立即锁定重复提交，显示真实的 `submitting`/`pending` 状态；不能用动画假装已经完成。
 - 页面状态必须同时提供文字、图标或明确颜色语义；动画不能是唯一的同步状态提示。
 - 必须支持 `prefers-reduced-motion: reduce`；减少动效时不能隐藏业务状态和错误信息。

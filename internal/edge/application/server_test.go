@@ -230,6 +230,67 @@ func TestEmployeeTaskSnapshotReturnsRecoveryMetadata(t *testing.T) {
 	}
 }
 
+func TestEmployeeHistoryAndNotificationRoutesAreScopedAndIdempotent(t *testing.T) {
+	store := edgesync.NewMemoryStore()
+	now := time.Date(2026, 9, 3, 8, 0, 0, 0, time.UTC)
+	for _, projection := range []edgesync.TaskProjection{
+		{PublicID: "history-completed", EmployeePublicID: "staff-history-1", Status: "completed", BusinessStatus: "completed", SyncVersion: 1, UpdatedAt: now},
+		{PublicID: "history-active", EmployeePublicID: "staff-history-1", Status: "assigned", BusinessStatus: "assigned", SyncVersion: 1, UpdatedAt: now.Add(time.Minute)},
+	} {
+		if err := store.UpsertTaskProjection(context.Background(), projection); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpsertNotificationProjection(context.Background(), edgesync.NotificationProjection{PublicID: "notification-1", EmployeePublicID: "staff-history-1", Title: "task update", Message: "task completed", Status: "unread", SyncVersion: 1, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServerWithStoreAndAuth(config.ServiceConfig{Port: 18089, Mode: "test", AllowDevActorHeaders: true}, nil, nil, zap.NewNop(), store, nil)
+	handler := server.Handler()
+	history := executeEmployeeRequest(handler, http.MethodGet, "/api/v1/history", "staff-history-1", nil)
+	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), "history-completed") || strings.Contains(history.Body.String(), "history-active") {
+		t.Fatalf("unexpected employee history response: status=%d body=%s", history.Code, history.Body.String())
+	}
+	notifications := executeEmployeeRequest(handler, http.MethodGet, "/api/v1/notifications?status=unread", "staff-history-1", nil)
+	if notifications.Code != http.StatusOK || !strings.Contains(notifications.Body.String(), "notification-1") {
+		t.Fatalf("unexpected notification response: status=%d body=%s", notifications.Code, notifications.Body.String())
+	}
+	read := executeEmployeeRequest(handler, http.MethodPost, "/api/v1/notifications/notification-1/read", "staff-history-1", nil)
+	if read.Code != http.StatusOK {
+		t.Fatalf("mark notification read status=%d body=%s", read.Code, read.Body.String())
+	}
+	readAgain := executeEmployeeRequest(handler, http.MethodPost, "/api/v1/notifications/notification-1/read", "staff-history-1", nil)
+	if readAgain.Code != http.StatusOK {
+		t.Fatalf("mark notification read should be idempotent: status=%d body=%s", readAgain.Code, readAgain.Body.String())
+	}
+	foreign := executeEmployeeRequest(handler, http.MethodPost, "/api/v1/notifications/notification-1/read", "staff-history-2", nil)
+	if foreign.Code != http.StatusNotFound {
+		t.Fatalf("foreign notification should be hidden: status=%d body=%s", foreign.Code, foreign.Body.String())
+	}
+}
+
+func TestEmployeeExceptionReportQueuesDurableCommand(t *testing.T) {
+	store := edgesync.NewMemoryStore()
+	server := NewServerWithStoreAndAuth(config.ServiceConfig{Port: 18090, Mode: "test", AllowDevActorHeaders: true}, nil, nil, zap.NewNop(), store, nil)
+	handler := server.Handler()
+	payload := []byte(`{"command_id":"exception-command-1","assignment_public_id":"assignment-1","expected_sync_version":7,"category":"equipment","severity":"high","description":"Belt loader unavailable"}`)
+	first := executeEmployeeRequest(handler, http.MethodPost, "/api/v1/tasks/task-exception-1/exceptions", "staff-exception-1", payload)
+	if first.Code != http.StatusAccepted || strings.Contains(first.Body.String(), "invalid_exception") {
+		t.Fatalf("exception report status=%d body=%s", first.Code, first.Body.String())
+	}
+	record, ok := store.CommandRecord("exception-command-1")
+	if !ok || record.Envelope.CommandType != "employee_report_task_exception.v1" || record.Envelope.AggregateID != "task-exception-1" {
+		t.Fatalf("unexpected exception command: %#v exists=%v", record, ok)
+	}
+	duplicate := executeEmployeeRequest(handler, http.MethodPost, "/api/v1/tasks/task-exception-1/exceptions", "staff-exception-1", payload)
+	if duplicate.Code != http.StatusAccepted || !strings.Contains(duplicate.Body.String(), `"duplicate":true`) {
+		t.Fatalf("duplicate exception report status=%d body=%s", duplicate.Code, duplicate.Body.String())
+	}
+	invalid := executeEmployeeRequest(handler, http.MethodPost, "/api/v1/tasks/task-exception-1/exceptions", "staff-exception-1", []byte(`{"command_id":"exception-command-2","assignment_public_id":"assignment-1","expected_sync_version":7,"category":"equipment","severity":"unknown","description":"Belt loader unavailable"}`))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid exception report status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestProjectionNotificationRunsAfterCommitAndIsBestEffort(t *testing.T) {
 	store := edgesync.NewMemoryStore()
 	fanout := edgenotification.NewInMemoryFanout()

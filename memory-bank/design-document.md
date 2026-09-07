@@ -1,61 +1,97 @@
 # Architecture v2.0 设计基线
 
-> 状态：Accepted / Frozen（2026-08-13）
-> 本文是已验收的 Architecture Foundation 可执行设计基线。当前已在该基线上完成 BVS2-03 `Flight → Task → Candidate` 首个 Core 业务切片；Leader Confirm、Edge Projection 和员工 Command 仍属于后续切片。
+> 架构状态：`ACCEPTED / FROZEN`（2026-08-13）
+> 当前业务边界：2026-09-07 版本
 
-## 产品与边界
+本文件保留稳定的架构决策；当前业务流程、状态机和验收口径以 [`docs/business-process-v2.md`](../docs/business-process-v2.md) 为准。
 
-产品名称为航空保障智能协同平台，服务单机场。核心目标是让正确的信息在正确时间传递给正确的人。
+## 产品与范围
 
-组织范围只有 `OperationArea -> Team -> Personnel`，并与 `Flight`、`Task`、`Event`、`Rule` 并列。禁止 Tenant/Airport 多租户模型、`tenant_id`、`airport_id`、airport scope 和机场切换。
+产品是航空客运地面代理协同平台，只服务单机场。首期覆盖国内/国际值机、自助值机、进出港、中转、配载平衡、特殊旅客、不正常航班、行李地面派送、航班地面保障、客运销售代理和航空信息咨询；维修、客舱及其他非旅客地面代理业务不在范围内。
 
-## 架构决策
+组织范围固定为 `OperationArea -> Team -> Personnel`，与 Flight、Task、Event、Rule 并列。禁止 Tenant/Airport 多租户模型、`tenant_id`、`airport_id`、多机场切换。
 
-仓库是单仓库。内网 Core 是模块化单体，云端 Edge 是移动端接入服务；两者使用完全独立的 MySQL、账号、schema 和 migration。Core 是唯一业务事实源，Edge 只保存最小 Projection 与 Command 数据。
+## Core/Edge 架构
 
-Core 与 Edge 通过版本化 Event/Command Envelope、Transactional Outbox、Inbox、幂等、Retry 和 Failed 状态同步。投递语义是 at-least-once，Core Worker 优先主动拉取 Edge Pending Commands；生产 Transport 预留 HTTPS/mTLS。
-
-## 本轮范围
-
-- Core API、Edge API、Worker、Migration 入口和独立生命周期。
-- 双数据库连接、独立 SQL migration、健康检查和本地 Compose。
-- Outbox、Inbox、Command Store、Event/Command Envelope、幂等、重试和失败记录。
-- Human/Machine Principal、四角色 RBAC、结构化 Data Scope、Authorizer Port 和 Audit 基础设施。
-- request_id、trace_id、structured logging、Core/Edge/Sync OpenAPI 骨架。
-- 仅测试/开发使用的双向 Architecture Probe 与故障测试。
-
-## 本轮非目标
-
-暂停 B3/B4/B5，不能实现真实航班、任务、人员、事件业务切片。也不实现 Kafka/RabbitMQ、Kubernetes、Service Mesh、分布式事务、复杂 CQRS/Event Sourcing、真实 AI、RFID/UWB、真实平台推送、SSO、完整多实例生产部署。T0-5 只实现本地 Gateway、双 Edge 和 best-effort fan-out 骨架，不等同于生产 HA 验收。
-
-## 设计验收条件
-
-1. Core/Edge 可独立启动并分别提供 live/ready。
-2. Core/Edge 数据库和 migration 独立，服务启动不调用 AutoMigrate。
-3. Core Transaction 可同库写业务 Probe 数据、Audit 和 Outbox。
-4. Edge Inbox 对重复 Event 幂等，Core Inbox 对重复 Command 幂等。
-5. Edge 故障、Worker 重启、Redis 故障不破坏 Core 事实和 Outbox。
-6. 双向 Probe 与对应集成/故障测试可重复运行。
-7. 文档、API 契约和代码入口不宣称当前开发环境已经达到 HA/RPO/RTO 目标。
+- Core 是模块化单体，拥有航班、人员、岗位、能力、人员状态、任务模板/实例/候选/分配、事件、规则、审计和业务状态机。
+- Edge 是员工接入服务，只保存最小 Projection、Command、Session、Inbox、通知和 delivery。
+- Core/Edge 使用独立 MySQL、账号、schema 和 migration；Edge 不直连 Core DB，Core 不直写 Edge DB。
+- Core 业务数据、状态历史、Audit 和 Outbox 在一个事务内提交；Worker 通过可靠 Outbox/Inbox 链路同步到 Edge。
+- 同步语义为 at-least-once、幂等、版本收敛、Retry/Failed。Redis 只做缓存、限流、短锁、在线状态和 best-effort fan-out。
 
 ## 依赖方向
 
 ```text
 HTTP handler -> Application service -> Domain/Port -> Repository adapter
 Core module  -> Core Application Port / shared
-Edge        -> Projection/Command store / shared
-integration -> stable business Port
+Edge         -> Projection/Command store / shared
+integration  -> stable business Port
 ```
 
-Handler 不调用 GORM；Service 不依赖 Gin；Domain 不依赖基础设施；模块不直接访问其他模块的表。
+Handler 不调用 GORM；Service 不依赖 Gin；Domain 不依赖 Gin、GORM 或 Redis；跨模块用例由 Core Application 编排。
 
-## T0 员工任务实时交付设计（2026-09-02）
+## 当前业务主干
 
-本节是 Architecture Foundation 冻结后的产品化实施方向；T0-4 已完成员工 WebSocket 提示和客户端接入，T0-5 已完成 Gateway、双 Edge、共享 ticket、租约和 Redis fan-out 代码，但不表示微信订阅消息或生产多实例故障验收已经完成，也不重新打开 Core/Edge 数据所有权边界。完整决策见 [`docs/adr/ADR-009-employee-task-realtime-delivery.md`](../docs/adr/ADR-009-employee-task-realtime-delivery.md) 和 [`docs/adr/ADR-010-gateway-edge-horizontal-scaling.md`](../docs/adr/ADR-010-gateway-edge-horizontal-scaling.md)。
+```text
+外部航班源
+  -> flight_source_inbox（幂等接收）
+  -> Worker 应用航班事实
+  -> 航班到达
+  -> pending_dispatch
+  -> 自动预分配
+  -> Core Assignment
+  -> Edge Projection
+  -> 员工 received -> start -> complete
+```
 
-- Edge 不按任务类型拆分；它是统一的员工接入和最小 Projection 服务，扩容时部署相同副本。
-- 员工任务的最终读取仍采用 Edge `GET /api/v1/tasks`。前台实时体验采用 WebSocket `task_changed` 提示，后台可接入经用户授权的平台通知；两者都不能替代拉取和恢复。
-- Core 事务仍写业务事实、Audit 和 Outbox；Worker 投递到 Edge Inbox，Edge Projection 事务提交后才触发尽力而为的通知。
-- 推送允许丢失、重复和乱序；客户端收到提示后重新拉取并按版本校准。断线、推送丢失或 Redis 不可用时，HTTP 拉取必须继续可用。
-- T0 顺序为：契约冻结 → 性能/同步基线 → 拉取恢复契约 → Notification Port → 前台 WebSocket → Gateway 与多 Edge/Worker → 后台平台通知 → 故障和容量门禁。
-- T0 不默认引入 Kafka、RabbitMQ、NATS、Service Mesh 或按任务拆分微服务；持久 Broker 必须以测量结果和独立 ADR 为前提。
+航班事实只能来自外部 Provider。管理端只读航班；开发种子中的航班仅为测试夹具。源状态为 `fresh/stale/fallback/failed`，Provider 失败时保留重试和诊断并读取最近一次预同步事实。
+
+自动调度 v1 过滤启用员工、任务区域/活动主班组、精确岗位、精确能力、`idle` 和同一计划时间冲突；按 `last_state_changed_at`、候选公共 ID 稳定排序。候选快照用于自动初派和收件超时重派。
+
+三层握手为：Core 系统 Assignment 确认、Outbox/Inbox Projection 投影确认、员工 `received` 收件回执。`received` 不是同意，员工没有拒绝动作；员工冲突通过异常/任务变更申请报告。
+
+## 角色与任务变更
+
+- `admin`：系统、身份、字典、审计和全局管理。
+- `manager`：授权范围内运行管理、自动派发补派、任务变更审批。
+- `leader`：团队/区域 Scope 内查看、报告和跟进，不能审批变更。
+- `supervisor`：授权范围内只读观察和管理实时订阅。
+- `staff`：本人任务的收件、开始、完成和异常报告。
+
+异常/任务变更支持 `pause`、`reassign`、`reschedule`、`cancel`、`resume`。员工、leader 或外部来源只能提出报告；只有 manager/admin 审批并应用。审批事务重新校验版本、状态、人员资格和时间冲突，并写 History/Audit/Outbox。
+
+## 身份与前端
+
+管理端 `admin-web` 只调用 Core；`employee-web`、个人微信小程序、企业微信小程序只调用 Edge。个人微信和企业微信身份都映射到同一个 Core Staff，平台标识不能直接作为业务身份。
+
+员工工号由服务端校验为固定长度纯数字字符串；人员通常绑定一个岗位和一个能力，岗位/能力编码创建后不可修改，字典删除为安全停用。
+
+真实微信/企业微信 Provider、管理端 SSO、HTTPS/回调域名、管理员预置和平台通知是部署验收事项；`mock:<subject>` 只用于开发。
+
+## 实时与读取
+
+管理端使用按 Scope 过滤的短时 SSE；员工端 WebSocket/原生 socket 只作 `task_changed` 提示。断线、重启或丢失提示时，管理端重新读取分页 API，员工端重新读取完整本人快照。
+
+Core 管理集合、Edge 历史和通知使用 `page/page_size/total` 与稳定排序；员工任务完整快照是恢复机制，不是管理端无界全量查询。
+
+## 验收与非目标
+
+代码/契约已覆盖自动派发、三层握手、收件超时重派、变更审批、航班源 inbox/fallback、字典 CRUD、管理订阅和集合分页。正式验收仍需真实 Provider、平台凭据/域名、告警渠道、多副本故障、性能基线以及接口失效、重复消息、断线、延误、取消、无候选和审批失败场景。
+
+不引入微服务拆分、Kafka/RabbitMQ、Kubernetes、Service Mesh、分布式事务、真实 AI/硬件、多租户或多机场模型。
+
+## 验证规则
+
+任何功能、数据库或 Compose 验证前先执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/ensure-docker.ps1
+```
+
+统一入口：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all
+```
+
+未实际运行的检查不得标记为通过；不得默认执行清库、`TRUNCATE`、migration down 或 `docker compose down -v`。

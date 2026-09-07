@@ -1,14 +1,17 @@
 # 前端 API 接入说明
 
-> 状态：F3 员工任务生命周期和 Core Scope E2E 已接入并在隔离双库通过；员工 Web 的 Command 收据支持刷新后恢复查询；个人微信/企业微信 Provider 适配器、原生小程序页面壳和管理端企业微信 SSO callback/Core 会话服务已加入，真实凭据/域名、员工与管理员主数据预置、服务故障注入和最终品牌评审仍待完成。
+> 状态：当前员工任务生命周期、Core Scope、任务变更申请和分页查询已接入；员工 Web 的 Command 收据支持刷新后恢复查询；个人微信/企业微信 Provider 适配器、原生小程序页面和管理端企业微信 SSO callback/Core 会话服务已加入，真实凭据/域名、平台告警、正式主数据、服务故障注入和最终品牌评审仍待完成。
+
+业务状态和握手语义以根目录 [`docs/business-process-v2.md`](../../docs/business-process-v2.md) 为准。员工 `received` 是收件回执，不是同意；员工无拒绝任务入口；员工应通过异常/变更申请报告冲突。
 
 ## 客户端边界
 
 | 客户端 | API | 当前实现 |
 | --- | --- | --- |
-| `apps/admin-web` | Core API | Task List、Task Detail、Confirm、Cancel |
-| `apps/employee-web` | Edge API | 工号密码登录、Refresh、Me、Logout、Projection、Accept、Complete、Command Status |
-| `apps/employee-miniapp` | Edge API | 原生 `wx.request` 网络适配、会话存储、登录/任务/任务详情/账号页面壳和同一组员工接口 |
+| `apps/admin-web` | Core API | Task/Assignment 查询、受控 Confirm/Cancel、任务变更审批、主数据与运行工作台 |
+| `apps/employee-web` | Edge API | 工号密码登录、Refresh、Me、Logout、Projection、received/start/complete、异常申请、Command Status |
+| `apps/employee-miniapp` | Edge API | 个人微信原生 `wx.login`/`wx.request` 网络适配、会话存储、登录/任务/任务详情/账号页面壳 |
+| `apps/employee-wecom-miniapp` | Edge API | 企业微信原生 `wx.qy.login`/`wx.request` 网络适配、独立会话存储、登录/任务/任务详情/账号页面壳 |
 
 浏览器只访问公开业务 API。Core/Edge 的 `/internal/sync/v1/*`、MySQL、Redis、Outbox、Inbox 和 Worker 不属于前端边界。
 
@@ -50,7 +53,7 @@ $env:E2E_SCOPE_AREA_ID = "<task-area-id>"
 pnpm.cmd exec playwright test
 ```
 
-`employee-task-lifecycle.spec.ts` 验证真实 `Accept → Command status → Complete → 刷新恢复`；`core-task-scope.spec.ts` 验证主任全局可见、正确团队/区域队长可见、错误 Scope 队长不可见；`edge-error-contract.spec.ts` 验证 Edge 的 401/403/404/409 错误契约。测试只通过 HTTP 访问业务 API，不连接数据库；测试夹具由隔离环境预置。
+`employee-task-lifecycle.spec.ts` 验证真实 `received → start → Command status → complete → 刷新恢复`；历史兼容路由只映射为 `start`，不改变当前业务含义。`core-task-scope.spec.ts` 验证管理角色按 Scope 可见；`edge-error-contract.spec.ts` 验证 Edge 的 401/403/404/409 错误契约。测试只通过 HTTP 访问业务 API，不连接数据库；测试夹具由隔离环境预置。
 
 ## UTF-8 编码约束
 
@@ -66,7 +69,13 @@ pnpm.cmd exec playwright test
 2. 本地调试模式：显式设置 `VITE_ENABLE_DEV_ACTOR=true`，由 Core 非 release 配置接收 `X-Actor-*` 开发适配头。该模式不会进入生产构建，前端也不会默认发送这些 Header。
 3. SSO callback 适配模式：配置 `VITE_ADMIN_SSO_START_URL` 和 `VITE_ADMIN_SSO_EXCHANGE_URL` 后，浏览器携带 `state` 跳转到企业微信并回到 `/sso/callback`；前端只把一次性 `code` 交给后端交换 Core 会话，不在 URL 或浏览器端保存第三方密钥。Core 已提供 `/api/v1/admin/auth/sso/start`、`/exchange`、`/me`、`/logout`，但上线前仍需应用 `000005_admin_sso` migration、预置 `admin_identity` 映射并注入真实企业微信配置。
 
-员工真实 Provider 的流程、配置和安全边界见 [`identity-provider-integration.md`](./identity-provider-integration.md)。个人微信小程序需要原生 `wx.login`，企业微信可以采用 OAuth/H5 code 或企业微信容器内的小程序入口；两者最终都由 Core 映射到同一个 `Staff`。
+员工真实 Provider 的流程、配置和安全边界见 [`identity-provider-integration.md`](./identity-provider-integration.md)。个人微信小程序使用原生 `wx.login`，企业微信小程序使用企业微信原生登录 code；两者是独立发布的客户端，最终都由 Core 映射到项目员工库中的同一个 `Staff`。
+
+## 分页查询
+
+Core 的管理集合统一返回 `data.items`、`data.page`、`data.page_size` 和 `data.total`。管理端 Web 的任务、航班、异常、组织/班组、人员、模板、规则、Assignment 和管理员身份页面均把页码和筛选条件交给服务端；筛选条件变化时回到第 1 页，切页请求使用 `AbortController` 取消旧请求。任务历史对 `completed` 与 `cancelled` 两个服务端分区分别分页后合并当前页，不在浏览器拉取 100 条再过滤。
+
+Edge 的历史和通知同样使用服务端分页，员工 Web、个人微信小程序和企业微信小程序均提供上一页/下一页。Edge `GET /api/v1/tasks` 仍固定返回当前员工的完整 Projection 快照，这是可靠恢复和版本收敛契约，不应被前端改写成普通分页列表；如果未来增加增量/分页读取，必须先扩展 Edge 合同并保留完整快照回退。
 
 ## 员工会话与命令
 
@@ -82,7 +91,7 @@ pnpm.cmd exec playwright test
 
 Edge 返回的 Access Token 和 Refresh Token 由 `@flight/auth` 管理。Access Token 失效时，恢复流程尝试 Refresh；Refresh 失败则清理本地会话并回到登录页。Token 不进入 URL、日志或诊断文案。
 
-Accept/Complete 为一次逻辑操作生成 UUID 形态的客户端 `command_id`，发送 `expected_sync_version`；网络失败后的同一操作重试会复用该 ID，内容冲突（409）后才重新建立操作。收到 `202` 后只显示 `pending/syncing`，再通过 `GET /api/v1/commands/{commandID}` 读取 `confirmed/failed`。员工 Web 会把当前 Command 收据作为单条 best-effort localStorage 恢复线索，刷新后继续查询；它不是可靠消息队列，服务端状态仍是唯一事实源。前端不会把 `202` 直接改写为任务已完成。
+`received`、`start` 和 `complete` 都是一次逻辑操作，生成 UUID 形态的客户端 `command_id` 并发送 `expected_sync_version`；网络失败后的同一操作重试会复用该 ID，内容冲突（409）后才重新建立操作。收到 `202` 后只显示 `pending/syncing`，再通过 `GET /api/v1/commands/{commandID}` 读取 `confirmed/failed`。员工 Web 会把当前 Command 收据作为单条 best-effort localStorage 恢复线索，刷新后继续查询；它不是可靠消息队列，服务端状态仍是唯一事实源。前端不会把 `202` 直接改写为任务已收件、已开始或已完成。
 
 ## 员工任务快照与离线恢复
 
@@ -90,7 +99,7 @@ Accept/Complete 为一次逻辑操作生成 UUID 形态的客户端 `command_id`
 
 当前响应固定为 `sync_mode=full_snapshot`、`next_cursor=null`、`reset_required=false`。启动、刷新、重连、收到未来的变化提示以及离线恢复都重新拉取并替换任务集合；HTTP 200 的 `items=[]` 是合法空结果。取消和完成任务以快照中的终态为准，本地缓存只改善体验，不承担可靠事实或离线队列职责。待处理 Command ID 单独保留，并通过 `GET /api/v1/commands/{commandID}` 恢复状态。
 
-管理端 Confirm/Cancel 同样复用一次逻辑操作的 `confirmation_id`/`cancellation_id`；选择候选人、修改取消原因或服务端返回冲突时，前端会重新建立操作 ID。
+管理端 Confirm/Cancel 同样复用一次逻辑操作的 `confirmation_id`/`cancellation_id`；任务变更使用持久化变更请求和当前 Task 版本，由经理/管理员审核。选择候选人、修改取消原因、提交变更或服务端返回冲突时，前端会重新建立操作 ID，不能直接改写任务事实。
 
 ## 员工 WebSocket 实时提示
 
@@ -98,14 +107,15 @@ Edge 提供 `POST /api/v1/realtime/ticket` 和 `GET /api/v1/ws`。前端先用�
 
 连接成功后服务端先发送 `ready`，随后发送 `ping`；客户端应回复 `{"type":"pong"}`。收到 `task_changed` 只代表 Projection 可能变化，前端应按 `notification_id`/任务版本做轻量去重，然后重新调用 `GET /api/v1/tasks` 并替换任务集合。连接断开、ticket 过期、提示丢失、重复或乱序时，继续使用带上限的指数退避重连和完整快照恢复；WebSocket 不可用不能阻塞任务读取或 Command status 查询。
 
-`employee-web` 已由 `@flight/api-client` 的 `RealtimeClient` 执行上述流程：登录会话存在时自动申请 ticket，连接/重连成功以及收到 `task_changed` 都触发页面级完整快照刷新。ticket 获取返回 401 时停止重连并交给会话恢复；其他网络失败使用带抖动的指数退避。当前 `employee-miniapp` 仍只接入 HTTP/微信网络适配器，未假设小程序可以复用浏览器 WebSocket ticket 流程。
+`employee-web` 已由 `@flight/api-client` 的 `RealtimeClient` 执行上述流程；个人微信和企业微信小程序使用各自的原生 Socket 适配器。连接/重连成功以及收到 `task_changed` 都只触发完整快照刷新；Socket、缓存和本地队列都不是可靠事实。
 
 ## 仍待接入
 
+- 100+ 条数据下的浏览器/Contract 分页验收；验收用例已加入 `frontend/e2e/admin-pagination.spec.ts`，需要在带管理端 Actor 的隔离环境中运行；
+- 当前管理端已完成岗位/能力、人员状态/状态历史、事件、审计、Scope、开发诊断页面；状态历史和所有管理集合使用服务端分页。区域/班组表单选项已改为带防抖和 AbortController 的远程搜索，不再依赖一次读取 100 条；
 - 管理端企业微信 SSO 的生产配置、管理员 `admin_identity` 预置和生产会话安全策略；Core 企业微信会话签发代码已接入；
-- 真实个人微信、企业微信 Provider 凭据、回调/通信域名和线上 code 联调；
-- 通知、异常、历史、人员、规则、报表等没有公开业务接口的模块；
-- 503 浏览器级故障注入、服务重启/网络分区、多副本 fan-out 和容量门禁；当前 401/403/404/409 错误契约、客户端错误映射、Scope、Command 生命周期和刷新恢复已有单元/API/真实隔离 E2E 覆盖。验证前必须运行根目录 `scripts/ensure-docker.ps1`。
+- 真实个人微信、企业微信 Provider 凭据、回调/通信域名、平台通知和线上 code 联调；
+- 503 浏览器级故障注入、服务重启/网络分区、多副本 fan-out、CI 和容量/性能门禁；当前 401/403/404/409 错误契约、客户端错误映射、Scope、Command 生命周期和刷新恢复已有单元/API/真实隔离 E2E 覆盖。验证前必须运行根目录 `scripts/ensure-docker.ps1`。
 ## 2026-09-03 Core 管理查询接口
 
 管理端现在可以通过 Core JWT 读取 `GET /api/v1/personnel` 和 `GET /api/v1/assignments`。两个接口由 Core RBAC 和服务端 scope 过滤；前端传入的筛选条件不会替代会话中的权限范围。管理端 SSO 的 Core 会话接口也已加入，但实际身份源、凭据、回调域名和管理员预置仍待部署联调。

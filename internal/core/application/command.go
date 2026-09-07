@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	coreexception "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/exception"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/application/flighttask"
 	coresync "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/sync"
 	sharedEvent "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/shared/event"
@@ -16,8 +17,10 @@ func HandleCommand(ctx context.Context, tx coresync.CoreTransaction, command sha
 	switch command.CommandType {
 	case "probe.complete.v1":
 		return HandleFoundationCommand(ctx, tx, command)
-	case flighttask.CommandEmployeeAcceptTask, flighttask.CommandEmployeeCompleteTask:
+	case flighttask.CommandEmployeeReceiveTask, flighttask.CommandEmployeeStartTask, flighttask.CommandEmployeeAcceptTask, flighttask.CommandEmployeeCompleteTask:
 		return flighttask.HandleEmployeeCommand(ctx, tx, command)
+	case coreexception.CommandReportTaskException:
+		return coreexception.HandleCommand(ctx, tx, command)
 	default:
 		return fmt.Errorf("unsupported core command type %q", command.CommandType)
 	}

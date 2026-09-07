@@ -1,4 +1,4 @@
-import type { AuthResult, Provider, ProviderExchangeRequest } from "@flight/contracts";
+import type { AuthResult, ProviderExchangeRequest } from "@flight/contracts";
 import { miniappSession } from "./session";
 
 export type LoginCodeProvider = () => Promise<string>;
@@ -24,33 +24,33 @@ export function personalWechatLoginCode(): Promise<string> {
 }
 
 /**
- * Exchange is deliberately provider-code based. For a WeCom H5 entry, pass
- * the OAuth callback code as `loginCode`; for a WeCom-native mini-program
- * entry, inject the code provider supplied by that platform runtime.
+ * Exchange is deliberately provider-code based. The personal WeChat client
+ * sends only its one-time wx.login code; the enterprise WeChat client has its
+ * own adapter and client identifier.
  */
-export async function exchangeProviderCode(provider: Provider, loginCode: string): Promise<AuthResult> {
-  const payload: ProviderExchangeRequest = { provider, provider_code: loginCode, client: "employee-miniapp" };
+export async function exchangeProviderCode(loginCode: string): Promise<AuthResult> {
+  const payload: ProviderExchangeRequest = { provider: "personal_wechat", provider_code: loginCode, client: "employee-miniapp" };
   return miniappSession.exchange(payload);
 }
 
 /**
  * First-use binding is a two-code flow: password establishes the employee
- * account and returns a one-time binding ticket, then a fresh platform code
- * binds the current WeChat/WeCom identity to that Staff.
+ * account and returns a one-time binding ticket, then a fresh personal WeChat
+ * code binds the current identity to that Staff.
  */
-export async function passwordLoginAndBind(provider: Provider, employeeNo: string, password: string, getCode: LoginCodeProvider = personalWechatLoginCode): Promise<AuthResult> {
+export async function passwordLoginAndBind(employeeNo: string, password: string, getCode: LoginCodeProvider = personalWechatLoginCode): Promise<AuthResult> {
   const passwordResult = await miniappSession.passwordLogin({
     employee_no: employeeNo,
     password,
     client: "employee-miniapp",
-    provider,
+    provider: "personal_wechat",
   });
   if (passwordResult.state === "authenticated") return passwordResult;
   if (!passwordResult.binding_ticket) throw new Error("绑定票据为空");
   const code = await getCode();
   return miniappSession.completeBinding({
     binding_ticket: passwordResult.binding_ticket,
-    provider,
+    provider: "personal_wechat",
     provider_code: code,
     client: "employee-miniapp",
   });

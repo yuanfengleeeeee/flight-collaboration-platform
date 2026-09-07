@@ -18,6 +18,10 @@ func TestRBACAndScope(t *testing.T) {
 	if err := authorizer.Authorize(manager, "task:read", security.AccessScope{TeamIDs: []uint64{99}}); err == nil {
 		t.Fatal("expected scope denial")
 	}
+	leader := security.Principal{Type: security.HumanPrincipal, PublicID: "leader", Roles: []string{security.RoleLeader}, Scopes: security.AccessScope{AreaIDs: []uint64{10}, TeamIDs: []uint64{20}}}
+	if err := authorizer.Authorize(leader, "scope:read", security.AccessScope{}); err != nil {
+		t.Fatalf("leader should be able to inspect own scope: %v", err)
+	}
 }
 
 func TestMachinePrincipalCannotUseHumanRole(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 
 func TestDiscoverCoreAndEdgeMigrations(t *testing.T) {
 	wantByTarget := map[string][]uint64{
-		"core": {1, 2, 3, 4, 5},
-		"edge": {1, 2, 3, 4, 5, 6},
+		"core": {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
+		"edge": {1, 2, 3, 4, 5, 6, 7},
 	}
 	for _, target := range []string{"core", "edge"} {
 		t.Run(target, func(t *testing.T) {

@@ -12,17 +12,30 @@ import (
 var defaultRolePermissions = map[string]map[security.Permission]bool{
 	security.RoleAdmin: {
 		"flight:read": true, "task:read": true, "task:assign": true, "task:cancel": true, "task:complete": true,
-		"event:handle": true, "personnel:read": true, "assignment:read": true, "rule:manage": true, "analytics:read": true,
+		"event:handle": true, "exception:read": true, "exception:manage": true, "personnel:read": true, "assignment:read": true, "rule:manage": true, "analytics:read": true,
+		"area:read": true, "area:manage": true, "team:read": true, "team:manage": true,
+		"template:read": true, "template:manage": true, "flight:manage": true, "personnel:manage": true, "admin_identity:manage": true,
+		"position:read": true, "position:manage": true, "capability:read": true, "capability:manage": true,
+		"status:read": true, "event:read": true, "audit:read": true, "scope:read": true, "diagnostics:read": true,
 	},
 	security.RoleManager: {
 		"flight:read": true, "task:read": true, "task:assign": true, "task:cancel": true, "task:complete": true,
-		"event:handle": true, "personnel:read": true, "assignment:read": true, "analytics:read": true,
+		"event:handle": true, "exception:read": true, "exception:manage": true, "personnel:read": true, "assignment:read": true, "analytics:read": true,
+		"area:read": true, "team:read": true, "template:read": true,
+		"position:read": true, "capability:read": true, "status:read": true, "event:read": true, "audit:read": true, "scope:read": true, "diagnostics:read": true,
 	},
 	security.RoleLeader: {
-		"flight:read": true, "task:read": true, "task:assign": true, "task:cancel": true, "event:handle": true, "personnel:read": true, "assignment:read": true,
+		"flight:read": true, "task:read": true, "task:assign": true, "task:cancel": true, "event:handle": true, "exception:read": true, "exception:manage": true, "personnel:read": true, "assignment:read": true,
+		"area:read": true, "team:read": true, "template:read": true, "analytics:read": true,
+		"position:read": true, "capability:read": true, "status:read": true, "event:read": true, "scope:read": true,
+	},
+	security.RoleSupervisor: {
+		"flight:read": true, "task:read": true, "exception:read": true, "personnel:read": true, "assignment:read": true, "analytics:read": true,
+		"area:read": true, "team:read": true, "template:read": true,
+		"position:read": true, "capability:read": true, "status:read": true, "event:read": true, "scope:read": true,
 	},
 	security.RoleStaff: {
-		"task:read": true, "task:accept": true, "task:complete": true, "event:handle": true,
+		"task:read": true, "task:receive": true, "task:start": true, "task:accept": true, "task:complete": true, "exception:report": true, "event:handle": true,
 	},
 }
 
@@ -75,6 +88,9 @@ func (a *Authorizer) hasPermission(roles []string, permission security.Permissio
 func machinePermissionAllowed(principal security.Principal, permission security.Permission) bool {
 	if principal.MachineUse == "" {
 		return false
+	}
+	if principal.MachineUse == "automatic-task-dispatch" && permission == "task:assign" {
+		return true
 	}
 	return strings.HasPrefix(string(permission), "sync:") || strings.HasPrefix(string(permission), "device:")
 }

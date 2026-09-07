@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
+	personnelmodule "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/module/personnel"
 	taskmodule "github.com/yuanfengleeeeee/flight-collaboration-platform/internal/core/module/task"
 	"github.com/yuanfengleeeeee/flight-collaboration-platform/internal/platform/security"
 )
@@ -45,9 +48,33 @@ type TaskReadModel struct {
 	Assignment       *taskmodule.Assignment
 }
 
+// TaskHistoryReadModel keeps the immutable Core history rows separate from
+// the task read model. The adapter supplies only facts; the application layer
+// flattens them into the public timeline shape.
+type TaskHistoryReadModel struct {
+	TaskPublicID         string
+	CurrentStatus        taskmodule.Status
+	CurrentStatusVersion uint64
+	TaskHistories        []taskmodule.StatusHistory
+	AssignmentHistories  []AssignmentHistoryReadModel
+	PersonnelHistories   []PersonnelHistoryReadModel
+}
+
+type AssignmentHistoryReadModel struct {
+	AssignmentPublicID string
+	PersonnelPublicID  string
+	History            taskmodule.AssignmentStatusHistory
+}
+
+type PersonnelHistoryReadModel struct {
+	PersonnelPublicID string
+	History           personnelmodule.StatusHistory
+}
+
 type TaskQueryRepository interface {
 	ListTaskReadModels(ctx context.Context, filter TaskQueryFilter) ([]TaskReadModel, int64, error)
 	FindTaskReadModel(ctx context.Context, publicID string, scope security.AccessScope) (TaskReadModel, error)
+	FindTaskHistory(ctx context.Context, publicID string, scope security.AccessScope) (TaskHistoryReadModel, error)
 }
 
 type TaskQueryService struct {
@@ -89,6 +116,29 @@ type TaskView struct {
 	Assignment           *TaskAssignmentDetailView `json:"assignment,omitempty"`
 }
 
+type TaskHistoryResult struct {
+	TaskPublicID         string             `json:"task_public_id"`
+	CurrentStatus        string             `json:"current_status"`
+	CurrentStatusVersion uint64             `json:"current_status_version"`
+	Events               []TaskHistoryEvent `json:"events"`
+}
+
+type TaskHistoryEvent struct {
+	PublicID           string `json:"public_id"`
+	Kind               string `json:"kind"`
+	StatusVersion      uint64 `json:"status_version"`
+	FromStatus         string `json:"from_status,omitempty"`
+	ToStatus           string `json:"to_status"`
+	Reason             string `json:"reason,omitempty"`
+	ActorType          string `json:"actor_type"`
+	ActorPublicID      string `json:"actor_public_id,omitempty"`
+	CommandID          string `json:"command_id,omitempty"`
+	SourceEventID      string `json:"source_event_id,omitempty"`
+	AssignmentPublicID string `json:"assignment_public_id,omitempty"`
+	PersonnelPublicID  string `json:"personnel_public_id,omitempty"`
+	OccurredAt         string `json:"occurred_at"`
+}
+
 type TaskCandidateDetailView struct {
 	PublicID                   string   `json:"public_id"`
 	PersonnelPublicID          string   `json:"personnel_public_id"`
@@ -104,14 +154,16 @@ type TaskCandidateDetailView struct {
 }
 
 type TaskAssignmentDetailView struct {
-	PublicID            string `json:"public_id"`
-	CandidatePublicID   string `json:"candidate_public_id"`
-	PersonnelPublicID   string `json:"personnel_public_id"`
-	Status              string `json:"status"`
-	StatusVersion       uint64 `json:"status_version"`
-	ConfirmationID      string `json:"confirmation_id"`
-	ConfirmedByPublicID string `json:"confirmed_by_public_id"`
-	ConfirmedAt         string `json:"confirmed_at"`
+	PublicID            string  `json:"public_id"`
+	CandidatePublicID   string  `json:"candidate_public_id"`
+	PersonnelPublicID   string  `json:"personnel_public_id"`
+	Status              string  `json:"status"`
+	StatusVersion       uint64  `json:"status_version"`
+	ReceiptStatus       string  `json:"receipt_status"`
+	ConfirmationID      string  `json:"confirmation_id"`
+	ConfirmedByPublicID string  `json:"confirmed_by_public_id"`
+	ConfirmedAt         string  `json:"confirmed_at"`
+	ReceivedAt          *string `json:"received_at,omitempty"`
 }
 
 func (s *TaskQueryService) ListTasks(ctx context.Context, principal security.Principal, filter TaskQueryFilter) (TaskListResult, error) {
@@ -164,6 +216,91 @@ func (s *TaskQueryService) GetTask(ctx context.Context, principal security.Princ
 	return taskViewFromReadModel(row), nil
 }
 
+func (s *TaskQueryService) GetTaskHistory(ctx context.Context, principal security.Principal, publicID string) (TaskHistoryResult, error) {
+	if s == nil || s.repository == nil {
+		return TaskHistoryResult{}, ErrRepositoryNotConfigured
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := s.authorizeRead(principal); err != nil {
+		return TaskHistoryResult{}, err
+	}
+	publicID = strings.TrimSpace(publicID)
+	if publicID == "" || len(publicID) > 128 {
+		return TaskHistoryResult{}, ErrTaskQueryInvalidInput
+	}
+	model, err := s.repository.FindTaskHistory(ctx, publicID, principal.Scopes)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return TaskHistoryResult{}, ErrTaskQueryNotFound
+		}
+		return TaskHistoryResult{}, fmt.Errorf("get task history %s: %w", publicID, err)
+	}
+	events := make([]TaskHistoryEvent, 0, len(model.TaskHistories)+len(model.AssignmentHistories)+len(model.PersonnelHistories))
+	for _, history := range model.TaskHistories {
+		events = append(events, taskHistoryEventFromTask(history))
+	}
+	for _, value := range model.AssignmentHistories {
+		events = append(events, taskHistoryEventFromAssignment(value))
+	}
+	for _, value := range model.PersonnelHistories {
+		events = append(events, taskHistoryEventFromPersonnel(value))
+	}
+	sort.SliceStable(events, func(i, j int) bool {
+		if events[i].OccurredAt == events[j].OccurredAt {
+			if events[i].StatusVersion == events[j].StatusVersion {
+				return events[i].PublicID < events[j].PublicID
+			}
+			return events[i].StatusVersion < events[j].StatusVersion
+		}
+		return events[i].OccurredAt < events[j].OccurredAt
+	})
+	return TaskHistoryResult{TaskPublicID: model.TaskPublicID, CurrentStatus: string(model.CurrentStatus), CurrentStatusVersion: model.CurrentStatusVersion, Events: events}, nil
+}
+
+func taskHistoryEventFromTask(history taskmodule.StatusHistory) TaskHistoryEvent {
+	return TaskHistoryEvent{PublicID: history.PublicID, Kind: "task", StatusVersion: history.StatusVersion, FromStatus: taskStatusValue(history.FromStatus), ToStatus: string(history.ToStatus), Reason: history.Reason, ActorType: history.ActorType, ActorPublicID: history.ActorPublicID, CommandID: history.CommandID, SourceEventID: history.SourceEventID, OccurredAt: formatHistoryTime(history.OccurredAt)}
+}
+
+func taskHistoryEventFromAssignment(value AssignmentHistoryReadModel) TaskHistoryEvent {
+	history := value.History
+	return TaskHistoryEvent{PublicID: history.PublicID, Kind: "assignment", StatusVersion: history.StatusVersion, FromStatus: assignmentStatusValue(history.FromStatus), ToStatus: string(history.ToStatus), Reason: history.Reason, ActorType: history.ActorType, ActorPublicID: history.ActorPublicID, CommandID: history.CommandID, AssignmentPublicID: value.AssignmentPublicID, PersonnelPublicID: value.PersonnelPublicID, OccurredAt: formatHistoryTime(history.OccurredAt)}
+}
+
+func taskHistoryEventFromPersonnel(value PersonnelHistoryReadModel) TaskHistoryEvent {
+	history := value.History
+	return TaskHistoryEvent{PublicID: history.PublicID, Kind: "personnel", StatusVersion: history.StatusVersion, FromStatus: personnelStatusValue(history.FromState), ToStatus: string(history.ToState), Reason: history.Reason, ActorType: history.ActorType, ActorPublicID: history.ActorPublicID, CommandID: history.CommandID, PersonnelPublicID: value.PersonnelPublicID, OccurredAt: formatHistoryTime(history.OccurredAt)}
+}
+
+func taskStatusValue(value *taskmodule.Status) string {
+	if value == nil {
+		return ""
+	}
+	return string(*value)
+}
+
+func assignmentStatusValue(value *taskmodule.AssignmentStatus) string {
+	if value == nil {
+		return ""
+	}
+	return string(*value)
+}
+
+func personnelStatusValue(value *personnelmodule.WorkState) string {
+	if value == nil {
+		return ""
+	}
+	return string(*value)
+}
+
+func formatHistoryTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
+}
+
 func (s *TaskQueryService) authorizeRead(principal security.Principal) error {
 	if principal.Type != security.HumanPrincipal || principal.PublicID == "" {
 		return ErrTaskQueryForbidden
@@ -185,7 +322,7 @@ func normalizeTaskQueryFilter(filter TaskQueryFilter) (TaskQueryFilter, error) {
 	filter.FlightPublicID = strings.TrimSpace(filter.FlightPublicID)
 	if filter.Status != "" {
 		switch taskmodule.Status(filter.Status) {
-		case taskmodule.StatusAwaitingConfirmation, taskmodule.StatusAssigned, taskmodule.StatusInProgress, taskmodule.StatusCompleted, taskmodule.StatusCancelled:
+		case taskmodule.StatusPendingDispatch, taskmodule.StatusAwaitingConfirmation, taskmodule.StatusAssigned, taskmodule.StatusInProgress, taskmodule.StatusCompleted, taskmodule.StatusCancelled:
 		default:
 			return TaskQueryFilter{}, ErrTaskQueryInvalidInput
 		}
@@ -222,7 +359,12 @@ func taskViewFromReadModel(row TaskReadModel) TaskView {
 	}
 	if row.Assignment != nil {
 		assignment := row.Assignment
-		view.Assignment = &TaskAssignmentDetailView{PublicID: assignment.PublicID, CandidatePublicID: candidatePublicID(row.Candidates, assignment.CandidateID), PersonnelPublicID: assignment.PersonnelPublicID, Status: string(assignment.Status), StatusVersion: assignment.StatusVersion, ConfirmationID: assignment.ConfirmationID, ConfirmedByPublicID: assignment.ConfirmedByPublicID, ConfirmedAt: assignment.ConfirmedAt.UTC().Format("2006-01-02T15:04:05.999999Z07:00")}
+		var receivedAt *string
+		if assignment.ReceivedAt != nil && !assignment.ReceivedAt.IsZero() {
+			value := assignment.ReceivedAt.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
+			receivedAt = &value
+		}
+		view.Assignment = &TaskAssignmentDetailView{PublicID: assignment.PublicID, CandidatePublicID: candidatePublicID(row.Candidates, assignment.CandidateID), PersonnelPublicID: assignment.PersonnelPublicID, Status: string(assignment.Status), StatusVersion: assignment.StatusVersion, ReceiptStatus: string(assignment.ReceiptStatus), ConfirmationID: assignment.ConfirmationID, ConfirmedByPublicID: assignment.ConfirmedByPublicID, ConfirmedAt: assignment.ConfirmedAt.UTC().Format("2006-01-02T15:04:05.999999Z07:00"), ReceivedAt: receivedAt}
 	}
 	return view
 }

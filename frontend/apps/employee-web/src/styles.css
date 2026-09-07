@@ -1,23 +1,36 @@
 :root {
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ops-ink-950: #081722;
+  --ops-ink-900: #102431;
+  --ops-paper-050: #f8fbfa;
+  --ops-paper-100: #f1f7f5;
+  --ops-surface: #ffffff;
+  --ops-line-200: #dce9e6;
+  --ops-signal-amber: #eeb65a;
+  --ops-signal-teal: #16847a;
+  --ops-signal-blue: #2d6e9f;
+  --ops-signal-red: #c94b45;
+  --ops-employee-teal: #0f5d67;
+  --ops-font-ui: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ops-font-data: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: var(--ops-font-ui);
   color: #1d3540;
-  background: #f4f8f7;
+  background: var(--ops-paper-100);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: #f1f7f5; }
+body { margin: 0; min-width: 320px; background: var(--ops-paper-100); }
 button, input, textarea { font: inherit; }
 a { color: inherit; text-decoration: none; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
-:focus-visible { outline: 3px solid #eeb65a; outline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--ops-signal-amber); outline-offset: 3px; }
 
 .employee-shell { min-height: 100vh; padding-bottom: 34px; }
 .employee-header { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 70px; padding: 0 max(22px, calc((100vw - 1050px) / 2)); background: rgba(255,255,255,.98); border-bottom: 1px solid #dce9e6; box-shadow: 0 6px 18px rgba(23, 75, 82, .04); }
 .employee-brand { display: flex; align-items: center; gap: 11px; }
-.brand-mark { display: grid; width: 34px; height: 34px; place-items: center; color: #fff; font-weight: 800; background: #0f5d67; border-radius: 9px; }
+.brand-mark { display: grid; width: 34px; height: 34px; place-items: center; color: #fff; font-weight: 800; background: var(--ops-employee-teal); border-radius: 9px; }
 .employee-brand strong, .employee-brand small { display: block; }
 .employee-brand strong { color: #163d48; font-size: 14px; }
 .employee-brand small { margin-top: 3px; color: #8aa19f; font-size: 9px; letter-spacing: .13em; }
@@ -44,14 +57,35 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .employee-counts button strong { color: #4c7776; font-family: "IBM Plex Mono", Consolas, monospace; }
 .employee-counts button.is-active { color: #1a5961; background: #e4f1ee; border-color: #c8e1db; }
 .employee-task-list { display: grid; gap: 11px; }
-.employee-task-card { position: relative; display: block; overflow: hidden; padding: 19px 20px 18px 23px; background: #fff; border: 1px solid #dce9e6; border-radius: 11px; box-shadow: 0 7px 22px rgba(23, 75, 82, .045); transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
+.employee-notification-list { display: grid; gap: 11px; }
+.employee-notification { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px; background: var(--ops-surface); border: 1px solid var(--ops-line-200); border-radius: 11px; }
+.employee-notification.is-unread { border-color: #8fc6bb; box-shadow: 0 7px 20px rgba(23, 97, 106, .08); }
+.employee-notification h2 { margin: 0; color: #274e57; font-size: 15px; }
+.employee-notification p { margin: 8px 0 6px; color: #567477; font-size: 13px; line-height: 1.6; }
+.employee-notification small { color: #9aadaa; font-size: 11px; }
+.notification-heading { display: flex; align-items: center; gap: 9px; }
+.notification-heading span { padding: 3px 7px; color: #6c8580; background: #edf4f1; border-radius: 999px; font-size: 10px; }
+.employee-notification.is-unread .notification-heading span { color: #17616a; background: #dff2ed; }
+.list-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px 2px; color: #78918f; font-size: 11px; }
+.list-pager__actions { display: inline-flex; gap: 8px; }
+.list-pager button { min-height: 34px; padding: 0 11px; color: #356970; background: #e0eeeb; border: 0; border-radius: 7px; font-size: 11px; font-weight: 700; }
+.list-pager button:disabled { color: #a7b9b6; background: #eef4f2; cursor: not-allowed; }
+.employee-exception-form { display: grid; gap: 14px; max-width: 720px; }
+.employee-exception-form label { display: grid; gap: 7px; color: #456b70; font-size: 12px; font-weight: 700; }
+.employee-exception-form input, .employee-exception-form select, .employee-exception-form textarea { width: 100%; box-sizing: border-box; padding: 10px 11px; font: inherit; font-weight: 400; }
+.employee-exception-form textarea { resize: vertical; line-height: 1.6; }
+.employee-task-card { position: relative; display: block; overflow: hidden; padding: 19px 20px 18px 23px; background: var(--ops-surface); border: 1px solid var(--ops-line-200); border-radius: 11px; box-shadow: 0 7px 22px rgba(23, 75, 82, .045); transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
 .employee-task-card::before { position: absolute; top: 0; bottom: 0; left: 0; width: 4px; background: #6eafa2; content: ""; }
+.employee-task-card.task-status-pending_dispatch::before, .employee-task-card.task-status-awaiting_confirmation::before, .employee-task-card.task-status-assigned::before { background: var(--ops-signal-amber); }
+.employee-task-card.task-status-in_progress::before { background: var(--ops-signal-blue); }
+.employee-task-card.task-status-completed::before { background: var(--ops-signal-teal); }
+.employee-task-card.task-status-cancelled::before { background: var(--ops-signal-red); }
 .employee-task-card:hover { border-color: #79afa8; box-shadow: 0 10px 26px rgba(23, 75, 82, .09); transform: translateY(-1px); }
 .task-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.flight-number { color: #21616a; font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13px; font-weight: 800; }
+.flight-number { color: #21616a; font-family: var(--ops-font-data); font-size: 13px; font-weight: 800; letter-spacing: .02em; }
 .status-badge, .command-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; }
 .status-badge > span, .command-badge > span { font-size: 8px; }
-.status-awaiting_confirmation, .status-assigned { color: #8b621f; background: #fff2d6; }
+.status-pending_dispatch, .status-awaiting_confirmation, .status-assigned { color: #8b621f; background: #fff2d6; }
 .status-in_progress { color: #35668a; background: #e1eff8; }
 .status-completed { color: #28746a; background: #e0f1ec; }
 .status-cancelled { color: #8d4b4b; background: #fae8e6; }
@@ -141,6 +175,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .employee-page-heading p:not(.eyebrow) { max-width: 255px; }
   .employee-nav a { min-width: 0; flex: 1; }
   .employee-nav { gap: 2px; }
+  .list-pager { align-items: flex-start; flex-direction: column; }
   .detail-flight-strip { padding: 17px; }
   .detail-flight-strip h1 { font-size: 23px; }
   .employee-facts { grid-template-columns: 1fr; gap: 10px; }

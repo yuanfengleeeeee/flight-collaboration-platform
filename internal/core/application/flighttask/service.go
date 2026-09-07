@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -177,6 +178,7 @@ type Transaction interface {
 type Service struct {
 	repository Repository
 	clock      clock.Clock
+	dispatcher AutomaticTaskDispatcher
 }
 
 func NewService(repository Repository, now clock.Clock) *Service {
@@ -186,9 +188,18 @@ func NewService(repository Repository, now clock.Clock) *Service {
 	return &Service{repository: repository, clock: now}
 }
 
+// SetAutomaticDispatcher wires the machine step after task generation. It is
+// optional so generation remains independently testable and a failed selector
+// leaves a durable pending_dispatch task for retry or operator attention.
+func (s *Service) SetAutomaticDispatcher(dispatcher AutomaticTaskDispatcher) {
+	if s != nil {
+		s.dispatcher = dispatcher
+	}
+}
+
 // BuildArrivalIdempotencyKey uses the source event when one exists. The
 // fallback is deterministic for the same flight and observed arrival time,
-// which keeps test/manual input idempotent without inventing a transport ID.
+// which keeps a provider retry idempotent when its transport event ID is absent.
 func BuildArrivalIdempotencyKey(input ArrivalInput) string {
 	if sourceEventID := strings.TrimSpace(input.SourceEventID); sourceEventID != "" {
 		return sourceEventID
@@ -215,7 +226,11 @@ func (s *Service) RecordFlightArrived(ctx context.Context, input ArrivalInput) (
 	}
 
 	if existing, findErr := s.repository.FindBusinessIdempotency(ctx, OperationFlightArrived, key); findErr == nil {
-		return replayResult(existing, requestHash)
+		result, replayErr := replayResult(existing, requestHash)
+		if replayErr != nil || result.TaskStatus != string(taskmodule.StatusPendingDispatch) {
+			return result, replayErr
+		}
+		return s.dispatchPendingTask(ctx, result)
 	} else if !errors.Is(findErr, ErrNotFound) {
 		return ArrivalResult{}, fmt.Errorf("find flight arrival idempotency: %w", findErr)
 	}
@@ -334,7 +349,7 @@ func (s *Service) RecordFlightArrived(ctx context.Context, input ArrivalInput) (
 			Name:                 template.Name,
 			Message:              template.DefaultMessage,
 			PlannedAt:            plannedAt,
-			Status:               taskmodule.StatusAwaitingConfirmation,
+			Status:               taskmodule.StatusPendingDispatch,
 			StatusVersion:        0,
 			SyncVersion:          0,
 		}
@@ -352,7 +367,7 @@ func (s *Service) RecordFlightArrived(ctx context.Context, input ArrivalInput) (
 			PublicID:      taskHistoryPublicID,
 			TaskID:        taskValue.ID,
 			StatusVersion: 0,
-			ToStatus:      taskmodule.StatusAwaitingConfirmation,
+			ToStatus:      taskmodule.StatusPendingDispatch,
 			ActorType:     normalized.ActorType,
 			ActorPublicID: normalized.ActorPublicID,
 			SourceEventID: normalized.SourceEventID,
@@ -405,7 +420,11 @@ func (s *Service) RecordFlightArrived(ctx context.Context, input ArrivalInput) (
 	if err != nil {
 		if errors.Is(err, ErrDuplicate) {
 			if existing, findErr := s.repository.FindBusinessIdempotency(ctx, OperationFlightArrived, key); findErr == nil {
-				return replayResult(existing, requestHash)
+				result, replayErr := replayResult(existing, requestHash)
+				if replayErr != nil || result.TaskStatus != string(taskmodule.StatusPendingDispatch) {
+					return result, replayErr
+				}
+				return s.dispatchPendingTask(ctx, result)
 			} else if !errors.Is(findErr, ErrNotFound) {
 				return ArrivalResult{}, fmt.Errorf("load flight arrival after duplicate: %w", findErr)
 			}
@@ -414,6 +433,20 @@ func (s *Service) RecordFlightArrived(ctx context.Context, input ArrivalInput) (
 	}
 	if businessErr != nil {
 		return result, businessErr
+	}
+	return s.dispatchPendingTask(ctx, result)
+}
+
+func (s *Service) dispatchPendingTask(ctx context.Context, result ArrivalResult) (ArrivalResult, error) {
+	if s == nil || s.dispatcher == nil || result.TaskStatus != string(taskmodule.StatusPendingDispatch) || len(result.Candidates) == 0 {
+		return result, nil
+	}
+	dispatched, err := s.dispatcher.Dispatch(ctx, result)
+	if err != nil {
+		return result, fmt.Errorf("automatically dispatch task %s: %w", result.TaskPublicID, err)
+	}
+	if dispatched.TaskPublicID != "" {
+		result.TaskStatus = dispatched.TaskStatus
 	}
 	return result, nil
 }
@@ -434,7 +467,10 @@ func normalizeArrivalInput(input ArrivalInput) (ArrivalInput, error) {
 		return ArrivalInput{}, ErrInvalidInput
 	}
 	if input.Source == "" {
-		input.Source = "manual"
+		return ArrivalInput{}, ErrInvalidInput
+	}
+	if input.Source == "manual" || !flightSourcePattern.MatchString(input.Source) {
+		return ArrivalInput{}, ErrInvalidInput
 	}
 	if input.ActorType == "" {
 		input.ActorType = "machine"
@@ -465,6 +501,8 @@ func normalizeArrivalInput(input ArrivalInput) (ArrivalInput, error) {
 	input.ActualArrivalAt = input.ActualArrivalAt.UTC()
 	return input, nil
 }
+
+var flightSourcePattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{1,63}$`)
 
 func hashArrivalInput(input ArrivalInput) (string, error) {
 	canonical := struct {

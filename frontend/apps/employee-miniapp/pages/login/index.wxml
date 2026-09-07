@@ -1,19 +1,15 @@
 <view class="page-shell login-page">
   <view class="eyebrow">EMPLOYEE / ACCESS</view>
   <view class="title">进入协同工作台</view>
-  <view class="muted">个人微信和企业微信绑定到同一个员工账号。首次使用需要工号和密码完成绑定。</view>
+  <view class="muted">这是个人微信员工入口。首次使用需要项目员工工号和密码完成绑定；企业微信请使用企业微信小程序。</view>
 
   <view class="card">
-    <view class="eyebrow">当前入口</view>
-    <view class="provider-row">
-      <button class="button {{provider === 'personal_wechat' ? '' : 'secondary'}}" size="mini" data-provider="personal_wechat" bindtap="selectProvider">个人微信</button>
-      <button class="button {{provider === 'wecom' ? '' : 'secondary'}}" size="mini" data-provider="wecom" bindtap="selectProvider">企业微信</button>
-    </view>
+    <button class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="quickLogin">{{loading ? '正在验证…' : '个人微信快捷登录'}}</button>
+    <view class="divider">首次绑定 / 恢复登录</view>
     <input class="input" type="text" value="{{employeeNo}}" data-field="employeeNo" bindinput="inputValue" placeholder="工号" />
     <input class="input" password value="{{password}}" data-field="password" bindinput="inputValue" placeholder="首次绑定请输入密码" />
-    <input wx:if="{{provider === 'wecom'}}" class="input" type="text" value="{{wecomCode}}" data-field="wecomCode" bindinput="inputValue" placeholder="企业微信 OAuth code（H5 回调时填写）" />
     <view wx:if="{{error}}" class="error">{{error}}</view>
-    <button class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="login">{{loading ? '正在验证…' : '微信快捷登录 / 绑定'}}</button>
+    <button class="button secondary" loading="{{loading}}" disabled="{{loading}}" bindtap="login">工号密码登录并绑定个人微信</button>
     <button class="button secondary" loading="{{passwordLoading}}" disabled="{{passwordLoading}}" bindtap="passwordOnlyLogin">仅使用工号密码登录</button>
   </view>
 </view>

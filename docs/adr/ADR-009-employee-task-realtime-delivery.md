@@ -51,7 +51,7 @@ Core 事务
 员工端
   ├─ 首次进入/刷新/重连：GET /api/v1/tasks
   ├─ 前台：接收 task_changed 后再次拉取
-  ├─ Accept/Complete：HTTP Command + command_id
+  ├─ received/start/complete：HTTP Command + command_id
   └─ Command 结果：GET /api/v1/commands/{commandID}，推送只能作为提示
 ```
 
@@ -93,7 +93,7 @@ Edge 必须在 Projection 事务提交之后再发出 `task_changed`。如果进
 
 ### 4. Command 状态
 
-Accept/Complete 仍然先通过 HTTP 将 Command 持久化到 Edge，并返回 `202 Accepted`；客户端使用稳定 `command_id` 和 `GET /api/v1/commands/{commandID}` 查看状态。WebSocket 可以发送 `command_changed` 作为刷新提示，但不得直接把 `pending` 或 `confirmed` 当成 Core 已完成的业务事实。
+received/start/complete 仍然先通过 HTTP 将 Command 持久化到 Edge，并返回 `202 Accepted`；客户端使用稳定 `command_id` 和 `GET /api/v1/commands/{commandID}` 查看状态。WebSocket 可以发送 `command_changed` 作为刷新提示，但不得直接把 `pending` 或 `confirmed` 当成 Core 已完成的业务事实。`received` 只确认员工已收到通知，不是同意；员工没有拒绝任务命令。
 
 ## 多 Edge 副本与中间件边界
 

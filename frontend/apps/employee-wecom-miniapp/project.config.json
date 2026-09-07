@@ -1,0 +1,17 @@
+{
+  "description": "航空客运地面代理协同 · 企业微信员工端",
+  "packOptions": { "ignore": [] },
+  "compileType": "miniprogram",
+  "libVersion": "3.8.0",
+  "appid": "your-wecom-appid",
+  "projectname": "flight-employee-wecom-miniapp",
+  "miniprogramRoot": "./",
+  "setting": {
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": false,
+    "urlCheck": false,
+    "compileHotReLoad": true
+  }
+}

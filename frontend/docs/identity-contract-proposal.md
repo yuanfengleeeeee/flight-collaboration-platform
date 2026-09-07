@@ -37,7 +37,7 @@
 3. 外部身份绑定由服务端完成并审计；客户端只能提交平台签发的临时凭据或授权码，不能提交自定义员工身份 Header。
 4. 员工身份未绑定、Staff 非 active、绑定冲突或会话失效时，客户端不得读取任务 Projection，也不得提交 Command。
 5. Core 仍是 Staff、Role、Scope 和绑定关系的事实源；Edge 只保存员工端所需的最小 Session/Projection/Command 数据，不直连 Core DB。
-6. `admin-web` 只使用 Core audience 的会话；`employee-miniapp` 和 `employee-web` 只使用 Edge audience 的会话。一个客户端拿到的 Token 不应被另一个 API 接受。
+6. `admin-web` 只使用 Core audience 的会话；`employee-miniapp`、`employee-wecom-miniapp` 和 `employee-web` 只使用 Edge audience 的会话。一个客户端拿到的 Token 不应被另一个 API 接受。
 7. JWT 只携带最小会话声明。角色和 Scope 由可信服务端解析或通过受控声明注入，前端展示的角色永远不等于最终授权。
 
 ### 2.2 用户需求匹配
@@ -86,13 +86,13 @@
 
 绑定个人微信后，员工还可以在“绑定企业微信”入口重复同一流程；绑定企业微信后也可以反向绑定个人微信。若外部身份已指向其他 Staff，必须返回冲突并停止自动迁移。
 
-### 4.2 员工微信小程序
+### 4.2 员工微信小程序与企业微信小程序
 
-个人微信和企业微信都进入同一套小程序业务壳层，但由不同 `AuthAdapter` 获取入口授权结果：
+个人微信小程序和企业微信小程序进入相同的业务页面结构，但由不同客户端和 `AuthAdapter` 获取入口授权结果：
 
 ```text
-小程序启动
-  → 判断入口 provider（personal_wechat / wecom）
+个人微信小程序或企业微信小程序启动
+  → 使用当前客户端固定的 provider（personal_wechat / wecom）
   → 获取一次性 provider_code
   → 调用员工认证换取接口
   → 服务端验证 provider_code
@@ -124,7 +124,7 @@
 企业微信 Session ─┘
 ```
 
-管理端对 Core Task 的确认/取消、员工在任一入口发出的 Accept/Complete，最终都通过既有 Core Event → Edge Projection 链路收敛。用户可能短时间看到旧状态，这是可靠同步的可见延迟，不是两套数据；前端必须展示刷新/同步状态，不能用本地结果覆盖服务端状态。
+管理端对 Core Task 的确认/取消和任务变更审批、员工在任一入口发出的 received/start/complete，最终都通过既有 Core Event → Edge Projection 链路收敛。用户可能短时间看到旧状态，这是可靠同步的可见延迟，不是两套数据；前端必须展示刷新/同步状态，不能用本地结果覆盖服务端状态。received 只表示已收到通知，不是同意；员工没有拒绝任务命令。
 
 ## 5. 公共认证合同
 
@@ -289,7 +289,7 @@ BVS2-07 已在 Core 增加受控的外部身份绑定用例和持久化模型，
 | `client_not_allowed` | 403 | 检查当前客户端与 Token audience |
 | `authentication_unavailable` | 503 | 展示认证服务暂不可用，可安全重试登录 |
 
-前端 `SessionState` 至少覆盖：`unknown`、`authenticating`、`binding_required`、`authenticated`、`expired`、`forbidden`、`unavailable`。未进入 `authenticated` 前，不加载 Task Projection，不渲染可提交的 Accept/Complete 动作。
+前端 `SessionState` 至少覆盖：`unknown`、`authenticating`、`binding_required`、`authenticated`、`expired`、`forbidden`、`unavailable`。未进入 `authenticated` 前，不加载 Task Projection，不渲染可提交的 received/start/complete 或异常申请动作。
 
 ## 9. F0 需要确认的决策
 

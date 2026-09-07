@@ -1,0 +1,12 @@
+{
+  "name": "@flight/employee-wecom-miniapp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@flight/auth": "workspace:*",
+    "@flight/contracts": "workspace:*",
+    "@flight/task-domain": "workspace:*"
+  },
+  "devDependencies": { "typescript": "^5.6.3" }
+}

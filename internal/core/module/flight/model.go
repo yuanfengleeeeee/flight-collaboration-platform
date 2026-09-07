@@ -12,12 +12,27 @@ const (
 	StatusCancelled Status = "cancelled"
 )
 
+type SourceState string
+
+const (
+	SourceStateFresh    SourceState = "fresh"
+	SourceStateStale    SourceState = "stale"
+	SourceStateFallback SourceState = "fallback"
+	SourceStateFailed   SourceState = "failed"
+)
+
 type Record struct {
 	ID                  uint64
 	PublicID            string
 	DisplayNo           string
+	SourceProvider      string
+	ExternalFlightID    string
 	OperatingDate       time.Time
 	ScheduledAt         time.Time
+	SourceLastSyncedAt  *time.Time
+	SourceState         SourceState
+	SourceLastAttemptAt *time.Time
+	SourceLastError     string
 	ActualArrivalAt     *time.Time
 	Status              Status
 	StatusVersion       uint64
