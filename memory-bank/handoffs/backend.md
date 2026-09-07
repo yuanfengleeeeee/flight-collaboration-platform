@@ -85,4 +85,4 @@
 powershell -ExecutionPolicy Bypass -File scripts/ensure-docker.ps1
 ```
 
-推荐入口：`powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all`。文档修订阶段不应用 migration、不清理数据库、不停止已有服务。本次交接提交为 `f2a8d1e`，`origin/agent/foundation-and-handoff` 已同步。
+推荐入口：`powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all`。文档修订阶段不应用 migration、不清理数据库、不停止已有服务。`origin/agent/foundation-and-handoff` 已同步到 `f2a8d1e`；最终交接状态提交因 GitHub TLS EOF 未推送，网络恢复后可正常重试。

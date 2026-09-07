@@ -2,7 +2,7 @@
 
 > 更新时间：2026-09-07
 > 当前分支：`agent/foundation-and-handoff`
-> 当前工作区：包含本项目既有代码、迁移、前端和文档修改；本次交接提交为 `f2a8d1e`。本轮文档修订没有应用迁移或清理数据库；GitHub 推送已成功，工作区已清洁。
+> 当前工作区：包含本项目既有代码、迁移、前端和文档修改；GitHub 已同步到 `f2a8d1e`，本地另有一条最终交接状态提交未能推送。本轮文档修订没有应用迁移或清理数据库；工作区已清洁。
 
 ## 当前唯一业务口径
 
@@ -70,4 +70,4 @@ powershell -ExecutionPolicy Bypass -File scripts/ensure-docker.ps1
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all
 ```
 
-文档修订阶段没有运行功能测试，也没有应用 migration、清空/删除数据库或停止已有服务；最近一次代码验证结果以 `memory-bank/progress.md` 最新条目为准。本地交接提交已完成，`origin/agent/foundation-and-handoff` 已同步到 `f2a8d1e`，未执行强推，工作区清洁。
+文档修订阶段没有运行功能测试，也没有应用 migration、清空/删除数据库或停止已有服务；最近一次代码验证结果以 `memory-bank/progress.md` 最新条目为准。`origin/agent/foundation-and-handoff` 已同步到 `f2a8d1e`；最终交接状态提交因 GitHub TLS EOF 未推送，未执行强推，工作区清洁，网络恢复后可正常重试。

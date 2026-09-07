@@ -39,4 +39,4 @@ powershell -ExecutionPolicy Bypass -File scripts/ensure-docker.ps1
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all
 ```
 
-文档修订阶段没有应用 migration、清理数据库或停止已有服务。本次交接提交为 `f2a8d1e`，`origin/agent/foundation-and-handoff` 已同步，未执行强推。不得默认执行 `docker compose down -v`、DROP、TRUNCATE 或 migration down。
+文档修订阶段没有应用 migration、清理数据库或停止已有服务。`origin/agent/foundation-and-handoff` 已同步到 `f2a8d1e`；最终交接状态提交因 GitHub TLS EOF 未推送，未执行强推，网络恢复后可正常重试。不得默认执行 `docker compose down -v`、DROP、TRUNCATE 或 migration down。
