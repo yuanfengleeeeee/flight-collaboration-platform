@@ -39,4 +39,4 @@ powershell -ExecutionPolicy Bypass -File scripts/ensure-docker.ps1
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all
 ```
 
-文档修订阶段没有应用 migration、清理数据库或停止已有服务；结束会话时按规则同步已核对的项目修改。不得默认执行 `docker compose down -v`、DROP、TRUNCATE 或 migration down。
+文档修订阶段没有应用 migration、清理数据库或停止已有服务。本次交接本地提交为 `23ecd22`；推送 `origin` 两次因 TLS 连接提前关闭失败，未执行强推，待网络恢复后可重试。不得默认执行 `docker compose down -v`、DROP、TRUNCATE 或 migration down。

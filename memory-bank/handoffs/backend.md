@@ -85,4 +85,4 @@
 powershell -ExecutionPolicy Bypass -File scripts/ensure-docker.ps1
 ```
 
-推荐入口：`powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all`。文档修订阶段不应用 migration、不清理数据库、不停止已有服务；结束会话时按规则同步已核对的项目修改。
+推荐入口：`powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all`。文档修订阶段不应用 migration、不清理数据库、不停止已有服务。本次交接本地提交为 `23ecd22`；推送 `origin` 因 TLS 连接提前关闭失败，待网络恢复后可重试。
