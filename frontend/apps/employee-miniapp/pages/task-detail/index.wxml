@@ -2,14 +2,17 @@
   <view wx:if="{{task}}">
     <view class="eyebrow">TASK / {{task.flight_display_no}}</view>
     <view class="realtime-state">实时：{{realtimeState}}</view>
+    <view class="projection-health">快照：{{projectionLagState === 'known' ? ('延迟 ' + projectionLagSeconds + ' 秒') : '同步延迟未知'}} · 版本 {{projectionRevision}}</view>
     <view class="title">{{task.task_name}}</view>
     <view class="tag status-tag-{{task.business_status || task.status}}">{{statusLabel}}</view>
     <view class="card"><view class="muted">{{task.area_name}} · {{task.planned_at}}</view><view class="detail-message">{{task.message}}</view></view>
     <view wx:if="{{notice}}" class="card muted">{{notice}}</view>
     <view wx:if="{{error}}" class="error">{{error}}</view>
-    <button wx:if="{{canReceive}}" class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="receive">我已收到</button>
-    <button wx:if="{{canStart}}" class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="start">开始执行</button>
-    <button wx:if="{{canComplete}}" class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="complete">完成任务</button>
+    <view wx:if="{{commandID}}" class="card command-panel">操作状态：{{commandStatusLabel}}。命令已持久化，最终结果以刷新后的任务快照为准。</view>
+    <button wx:if="{{canReceive}}" class="button" loading="{{loading}}" disabled="{{loading || commandID}}" bindtap="receive">我已收到</button>
+    <button wx:if="{{canStart}}" class="button" loading="{{loading}}" disabled="{{loading || commandID}}" bindtap="start">开始执行</button>
+    <button wx:if="{{canComplete}}" class="button" loading="{{loading}}" disabled="{{loading || commandID}}" bindtap="complete">标记完成</button>
+    <view wx:if="{{!canReceive && !canStart && !canComplete && (task.business_status === 'paused' || task.status === 'paused')}}" class="card muted">任务已暂停，等待管理端审核恢复申请。</view>
     <button wx:if="{{!canReceive && !canStart && !canComplete}}" class="button secondary" bindtap="reload">刷新状态</button>
   </view>
   <view wx:else class="card muted">正在读取任务详情…</view>

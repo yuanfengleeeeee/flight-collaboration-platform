@@ -2,10 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { FormEvent, ReactNode } from "react";
 import { ApiClientError } from "@flight/api-client";
-import type { CoreAdminIdentity, CoreArea, CoreAssignment, CoreAuditEntry, CoreCapability, CoreDiagnostics, CoreEvent, CoreException, CoreFlight, CorePersonnel, CorePersonnelStatus, CorePersonnelStatusHistory, CorePosition, CoreReportOverview, CoreScopeView, CoreTask, CoreTaskChangeRequest, CoreTaskHistory, CoreTemplate, CoreTeam, TaskStatus } from "@flight/contracts";
+import type { ManagementRealtimeState } from "@flight/api-client";
+import type { CoreAdminIdentity, CoreArea, CoreAssignment, CoreAuditEntry, CoreCapability, CoreDiagnostics, CoreEvent, CoreException, CoreFlight, CorePersonnel, CorePersonnelStatus, CorePersonnelStatusHistory, CorePosition, CoreReportOverview, CoreScopeView, CoreTask, CoreTaskChangeRequest, CoreTaskHistory, CoreTemplate, CoreTeam, TaskChangeRequestStatus, TaskStatus } from "@flight/contracts";
 import { ListPager, Notice, StatusBadge } from "@flight/ui";
-import { createClientID } from "@flight/task-domain";
-import { adminRuntime, adminSsoEnabled, adminSsoReturnPath, beginAdminSso, clearAdminAccessToken, coreApi, exchangeAdminSsoCode, hasAdminAccess, readAdminAccessToken, saveAdminAccessToken } from "./runtime";
+import { assignmentStatusLabel, flightStatusLabel, receiptStatusLabel, sourceStateLabel, taskChangeActionLabel, taskChangeRequestStatusLabel, taskStatusLabel, createClientID } from "@flight/task-domain";
+import { adminRuntime, adminSsoEnabled, adminSsoReturnPath, beginAdminSso, clearAdminAccessToken, coreApi, createAdminRealtimeClient, exchangeAdminSsoCode, hasAdminAccess, readAdminAccessToken, saveAdminAccessToken } from "./runtime";
 
 const navGroups = [
   { label: "运行", items: [["overview", "运行总览"], ["flights", "航班运行"]] },
@@ -52,7 +53,7 @@ const moduleReadPermissions: Record<string, string> = {
   rules: "template:read",
   events: "event:read",
   exceptions: "exception:read",
-  changes: "exception:manage",
+  changes: "exception:read",
   audit: "audit:read",
   reports: "analytics:read",
   "users-roles": "admin_identity:manage",
@@ -213,6 +214,45 @@ function useAdminAccess(): AdminAccessContextValue {
   return useContext(AdminAccessContext);
 }
 
+type AdminRealtimeContextValue = {
+  version: number;
+  state: ManagementRealtimeState;
+  lastEventID: number;
+  lastEventAt?: string;
+};
+
+const AdminRealtimeContext = createContext<AdminRealtimeContextValue>({ version: 0, state: "idle", lastEventID: 0 });
+
+function AdminRealtimeProvider({ children }: { children: ReactNode }): JSX.Element {
+  const access = useAdminAccess();
+  const [version, setVersion] = useState(0);
+  const [state, setState] = useState<ManagementRealtimeState>("idle");
+  const [lastEventID, setLastEventID] = useState(0);
+  const [lastEventAt, setLastEventAt] = useState<string>();
+  const client = useMemo(() => createAdminRealtimeClient((event) => {
+    setVersion((current) => current + 1);
+    setLastEventID(event.id);
+    setLastEventAt(event.occurred_at);
+  }, setState), []);
+
+  useEffect(() => {
+    if (access.loading) return undefined;
+    if (!access.can("event:read")) {
+      client.stop();
+      return undefined;
+    }
+    client.start();
+    return () => client.stop();
+  }, [access, client]);
+
+  const value = useMemo(() => ({ version, state, lastEventID, lastEventAt }), [lastEventAt, lastEventID, state, version]);
+  return <AdminRealtimeContext.Provider value={value}>{children}</AdminRealtimeContext.Provider>;
+}
+
+function useAdminRealtime(): AdminRealtimeContextValue {
+  return useContext(AdminRealtimeContext);
+}
+
 export function App(): JSX.Element {
   return <Routes>
     <Route path="/login" element={<AdminLoginPage />} />
@@ -294,20 +334,21 @@ function AdminLoginPage(): JSX.Element {
 }
 
 function AdminLayout(): JSX.Element {
-  return <AdminAccessProvider><AdminShell /></AdminAccessProvider>;
+  return <AdminAccessProvider><AdminRealtimeProvider><AdminShell /></AdminRealtimeProvider></AdminAccessProvider>;
 }
 
 function AdminShell(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const access = useAdminAccess();
+  const realtime = useAdminRealtime();
   function logout(): void { clearAdminAccessToken(); navigate("/login"); }
   return <div className="admin-shell">
     <aside className="admin-sidebar">
       <Link to="/tasks" className="brand-lockup"><span className="brand-mark">A</span><span><strong>航空客运地面代理协同</strong><small>OPERATIONS / CONTROL</small></span></Link>
       <nav aria-label="管理端工作区" className="admin-nav">{navGroups.map((group) => { const items = group.items.filter(([section]) => access.loading || access.can(moduleReadPermissions[section])); if (items.length === 0) return null; return <div className="nav-group" key={group.label}><span className="nav-label">{group.label}</span>{items.map(([section, label]) => { const active = location.pathname.includes(`/${section}`); return <Link key={section} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined} to={`/${section}`}>{label}</Link>; })}</div>; })}</nav>
       <div className="scope-card"><span>当前授权范围</span><strong>{access.loading ? "正在读取 Core Scope…" : access.scope?.global ? "全部团队 · 全部区域" : access.roles.includes("leader") ? "当前团队 / 区域" : "由 Core Scope 决定"}</strong><small>{access.error ? "权限状态读取失败，操作仍由 Core 校验" : "前端只做入口提示，不替代服务端授权"}</small></div>
-      <div className="sidebar-footer"><div><span className="avatar">{adminRuntime.devActorEnabled ? adminRuntime.devActorRole.slice(0, 1).toUpperCase() : "C"}</span><span><strong>{adminRuntime.devActorEnabled ? adminRuntime.devActorRole : "Core session"}</strong><small>管理端会话</small></span></div><button className="text-button" onClick={logout}>退出</button></div>
+      <div className="sidebar-footer"><div><span className="avatar">{adminRuntime.devActorEnabled ? adminRuntime.devActorRole.slice(0, 1).toUpperCase() : "C"}</span><span><strong>{adminRuntime.devActorEnabled ? adminRuntime.devActorRole : "Core session"}</strong><small>管理端会话</small><small aria-live="polite">实时：{managementRealtimeStateLabel[realtime.state]}{realtime.lastEventID ? ` · #${realtime.lastEventID}` : ""}</small></span></div><button className="text-button" onClick={logout}>退出</button></div>
     </aside>
     <section className="admin-content"><header className="content-topline"><span>运行管理台 <i>/</i> {location.pathname.startsWith("/tasks") ? "任务工作台" : "工作区"}</span><span className="sync-pill">Core API · 实时读取</span></header><div className="page-body"><Outlet /></div></section>
   </div>;
@@ -319,14 +360,14 @@ function ModulePage({ section }: { section: string }): JSX.Element {
   if (!access.loading && requiredPermission && !access.can(requiredPermission)) return <AccessDeniedPage section={section} />;
   if (section === "overview") return <OverviewPage />;
   if (section === "organization") return <OrganizationPage />;
-  if (section === "flights") return <FlightManagementPage />;
+  if (section === "flights") return <FlightManagementPageV2 />;
   if (section === "personnel") return <PersonnelManagementPageV2 />;
   if (section === "templates") return <TemplateManagementPageV2 />;
-  if (section === "assignments") return <AssignmentManagementPage />;
+  if (section === "assignments") return <AssignmentManagementPageV2 />;
   if (section === "users-roles") return <AdminIdentityManagementPage />;
   if (section === "history") return <TaskHistoryPage />;
   if (section === "exceptions") return <ExceptionManagementPage />;
-  if (section === "changes") return <TaskChangeRequestsPage />;
+  if (section === "changes") return <TaskChangeRequestsPageV2 />;
   if (section === "rules") return <RulesPage />;
   if (section === "reports") return <ReportsPage />;
   if (section === "positions") return <PositionCapabilityPage />;
@@ -334,7 +375,7 @@ function ModulePage({ section }: { section: string }): JSX.Element {
   if (section === "events") return <EventsPage />;
   if (section === "audit") return <AuditPage />;
   if (section === "scopes") return <ScopesPage />;
-  if (section === "diagnostics") return <DiagnosticsPage />;
+  if (section === "diagnostics") return <DiagnosticsPageV2 />;
   const copy = moduleCopy[section] ?? moduleCopy.overview;
   const blueprint = moduleBlueprints[section];
   return <div className="module-page"><div className="page-heading"><div><p className="eyebrow">MODULE / {section.toUpperCase()}</p><h1>{copy.title}</h1><p className="page-description">{copy.description}</p></div><span className="module-stage">首期页面设计壳</span></div><div className="module-blueprint"><section className="blueprint-card blueprint-card-primary"><p className="eyebrow">DATA BOUNDARY</p><h2>{blueprint?.dataBoundary ?? "业务模块数据"}</h2><p>数据由 Core API 提供，页面只负责展示和提交已冻结的业务命令。</p></section><section className="blueprint-card"><p className="eyebrow">PLANNED CONTROLS</p><ul>{(blueprint?.controls ?? ["筛选条件", "状态", "更新时间"]).map((item) => <li key={item}>{item}</li>)}</ul></section><section className="blueprint-card"><p className="eyebrow">PAGE BLOCKS</p><ul>{(blueprint?.blocks ?? ["主数据区", "状态区", "审计区"]).map((item) => <li key={item}>{item}</li>)}</ul></section></div><section className="empty-panel"><span className="empty-symbol">□</span><p className="eyebrow">DATA CONTRACT PENDING</p><h2>页面边界已注册</h2><p>当前模块保留完整页面结构、筛选入口和状态位置，待后端公开接口契约确认后接入真实数据；不会用浏览器内的临时数据冒充业务事实。</p><div className="empty-facts"><span><small>数据源</small><strong>待接入 Core API</strong></span><span><small>授权范围</small><strong>由服务端 Scope 决定</strong></span><span><small>下一步</small><strong>{blueprint?.nextStep ?? "等待接口契约冻结"}</strong></span></div></section></div>;
@@ -347,6 +388,7 @@ function AccessDeniedPage({ section }: { section: string }): JSX.Element {
 
 function TaskListPage(): JSX.Element {
   const [status, setStatus] = useState<TaskStatus | "">("");
+  const [flightPublicID, setFlightPublicID] = useState("");
   const [items, setItems] = useState<CoreTask[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -354,23 +396,24 @@ function TaskListPage(): JSX.Element {
   const [error, setError] = useState<ApiClientError>();
   const [requestID, setRequestID] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const { version: realtimeVersion } = useAdminRealtime();
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(undefined);
-    coreApi.listTasks({ status: status || undefined, page, page_size: LIST_PAGE_SIZE }, controller.signal).then((response) => {
+    coreApi.listTasks({ status: status || undefined, flight_public_id: flightPublicID || undefined, page, page_size: LIST_PAGE_SIZE }, controller.signal).then((response) => {
       setItems(response.data.items); setPage(response.data.page); setTotal(response.data.total); setRequestID(response.request_id ?? "");
     }).catch((value: unknown) => { if (!controller.signal.aborted) setError(value instanceof ApiClientError ? value : new ApiClientError(0, { code: "network_error", message: "无法连接 Core API" })); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [page, status, reloadKey]);
+  }, [flightPublicID, page, realtimeVersion, reloadKey, status]);
 
   return <div className="module-page task-page"><div className="page-heading"><div><p className="eyebrow">TASK / CORE FACTS</p><h1>任务工作台</h1><p className="page-description">任务可见范围由 Core 根据主任、队长角色和团队/区域 Scope 决定。</p></div><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新列表</button></div>
     <div className="metric-row"><Metric label="当前可见" value={String(items.length)} /><Metric label="待派发/收件" value={String(items.filter((task) => task.status === "pending_dispatch" || task.status === "awaiting_confirmation" || task.status === "assigned").length)} /><Metric label="执行中" value={String(items.filter((task) => task.status === "in_progress").length)} /><Metric label="已完成" value={String(items.filter((task) => task.status === "completed").length)} /></div>
-    <section className="task-panel"><div className="toolbar"><label>状态<select value={status} onChange={(event) => { setStatus(event.target.value as TaskStatus | ""); setPage(1); }}><option value="">全部状态</option><option value="pending_dispatch">待自动派发</option><option value="awaiting_confirmation">待确认（兼容）</option><option value="assigned">已派发/待收件</option><option value="in_progress">执行中</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label><span className="scope-inline">{adminRuntime.devActorEnabled ? `${adminRuntime.devActorRole} · 开发 Scope` : "Bearer JWT · Core Scope"}</span></div>
+    <section className="task-panel"><div className="toolbar"><label>状态<select value={status} onChange={(event) => { setStatus(event.target.value as TaskStatus | ""); setPage(1); }}><option value="">全部状态</option><option value="pending_dispatch">待自动派发</option><option value="awaiting_confirmation">待确认（历史兼容）</option><option value="assigned">已分配 / 收件</option><option value="in_progress">执行中</option><option value="paused">已暂停</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label><label>航班 ID<input value={flightPublicID} onChange={(event) => { setFlightPublicID(event.target.value); setPage(1); }} placeholder="按航班 public_id 筛选" /></label><span className="scope-inline">{adminRuntime.devActorEnabled ? `${adminRuntime.devActorRole} · 开发 Scope` : "Bearer JWT · Core Scope"}</span></div>
       {loading && <div className="panel-state">正在从 Core 读取任务…</div>}
       {error && <div className="panel-state"><Notice tone="error"><strong>{error.body.code}</strong> · {error.message}{error.body.request_id && <small>request_id: {error.body.request_id}</small>}<button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>重新读取</button></Notice></div>}
       {!loading && !error && items.length === 0 && <div className="panel-state"><span className="empty-symbol">∅</span><h2>当前范围没有任务</h2><p>如果你是队长，这表示当前团队/区域没有返回可见任务；如果你是主任，请检查 Core 数据或筛选条件。</p></div>}
-      {!loading && !error && items.length > 0 && <div className="table-scroll"><table><thead><tr><th>计划时间</th><th>航班 / 任务</th><th>区域 / 团队</th><th>状态</th><th>版本</th><th /></tr></thead><tbody>{items.map((task) => <tr key={task.public_id}><td className="data-number">{formatDate(task.planned_at)}</td><td><Link className="task-link" to={`/tasks/${task.public_id}`}><strong>{task.flight_display_no || task.flight_public_id}</strong><span>{task.name}</span></Link></td><td><span>{task.area_public_id}</span><small>{task.team_public_id}</small></td><td><StatusBadge status={task.status} /></td><td className="data-number">v{task.status_version} / s{task.sync_version}</td><td><Link className="row-link" to={`/tasks/${task.public_id}`}>详情 →</Link></td></tr>)}</tbody></table></div>}
+      {!loading && !error && items.length > 0 && <div className="table-scroll"><table><thead><tr><th>计划时间</th><th>航班 / 任务</th><th>区域 / 团队</th><th>状态</th><th>分配 / 收件</th><th>版本</th><th /></tr></thead><tbody>{items.map((task) => <tr key={task.public_id}><td className="data-number">{formatDate(task.planned_at)}</td><td><Link className="task-link" to={`/tasks/${task.public_id}`}><strong>{task.flight_display_no || task.flight_public_id}</strong><span>{task.name}</span></Link></td><td><span>{task.area_public_id}</span><small>{task.team_public_id}</small></td><td><StatusBadge status={task.status} label={taskStatusLabel[task.status]} /></td><td>{task.assignment ? <><span>{assignmentStatusLabel[task.assignment.status]}</span><small>{receiptStatusLabel[task.assignment.receipt_status]}</small></> : <span className="muted">未分配</span>}</td><td className="data-number">v{task.status_version} / s{task.sync_version}</td><td><Link className="row-link" to={`/tasks/${task.public_id}`}>详情 →</Link></td></tr>)}</tbody></table></div>}
       <ListPager page={page} pageSize={LIST_PAGE_SIZE} total={total} onPageChange={setPage} disabled={loading} />
       <footer className="list-footer"><span>Core 返回当前页 {items.length} 条，列表查询已分页</span>{requestID && <span>request_id: {requestID}</span>}</footer>
     </section>
@@ -380,6 +423,8 @@ function TaskListPage(): JSX.Element {
 function TaskDetailPage(): JSX.Element {
   const { taskPublicID } = useParams();
   const navigate = useNavigate();
+  const access = useAdminAccess();
+  const { version: realtimeVersion } = useAdminRealtime();
   const [task, setTask] = useState<CoreTask>();
   const [candidateID, setCandidateID] = useState("");
   const [reason, setReason] = useState("");
@@ -393,7 +438,7 @@ function TaskDetailPage(): JSX.Element {
     setBusy("load"); setNotice(undefined);
     coreApi.getTask(taskPublicID).then((response) => { setTask(response.data); setCandidateID(response.data.candidates.find((candidate) => candidate.status === "proposed")?.public_id ?? ""); setConfirmationID(undefined); setCancellationID(undefined); }).catch((value: unknown) => setNotice({ tone: "error", text: value instanceof ApiClientError ? `${value.body.code} · ${value.message}` : "无法读取任务详情" })).finally(() => setBusy(""));
   }, [taskPublicID]);
-  useEffect(() => load(), [load]);
+  useEffect(() => load(), [load, realtimeVersion]);
 
   async function confirm(): Promise<void> {
     if (!task || !candidateID) return;
@@ -412,15 +457,15 @@ function TaskDetailPage(): JSX.Element {
 
   if (busy === "load" && !task) return <div className="panel-state">正在从 Core 读取任务详情…</div>;
   if (!task) return <div className="panel-state"><Notice tone="error">任务详情不可用。<button className="secondary-button" onClick={() => navigate("/tasks")}>返回任务列表</button></Notice></div>;
-  const canManage = task.status === "pending_dispatch" || task.status === "awaiting_confirmation";
-  const canCancel = task.status !== "completed" && task.status !== "cancelled";
+  const canManage = access.can("task:assign") && (task.status === "pending_dispatch" || task.status === "awaiting_confirmation");
+  const canCancel = access.can("task:cancel") && task.status !== "completed" && task.status !== "cancelled";
   const actionTitle = canManage ? "处理这个任务" : canCancel ? "受控处置任务" : "当前为只读状态";
   const actionDescription = canManage
     ? "系统会自动从候选人中派发；此处仅用于自动派发失败时的受控补派，不是员工审批。取消会记录原因。"
     : canCancel
       ? "任务已经派发或正在执行。航班延误、取消或现场事件需要调整时，由值班经理按受控指令取消并记录原因。"
       : "任务当前状态不允许在此处继续处理。";
-  return <div className="module-page task-detail-page"><button className="back-link button-reset" onClick={() => navigate("/tasks")}>← 返回任务工作台</button><div className="detail-heading"><div><p className="eyebrow">FLIGHT / {task.flight_display_no || task.flight_public_id}</p><h1>{task.name}</h1><p className="page-description">{task.area_public_id} · {task.team_public_id} · {task.message || "暂无任务说明"}</p></div><StatusBadge status={task.status} /></div>{notice && <Notice tone={notice.tone}>{notice.text}</Notice>}<div className="detail-grid"><section className="detail-card"><h2>任务事实</h2><div className="fact-grid"><Fact label="计划时间" value={formatDate(task.planned_at)} /><Fact label="触发类型" value={task.trigger_type || "—"} /><Fact label="Task 版本" value={`v${task.status_version}`} /><Fact label="同步版本" value={`s${task.sync_version}`} /><Fact label="岗位要求" value={task.required_position_code || "—"} /><Fact label="能力要求" value={task.required_capabilities.join("、") || "—"} /></div></section><section className="detail-card"><h2>候选人员</h2>{task.candidates.length === 0 ? <p className="muted">Core 没有返回候选人员。</p> : <div className="candidate-list">{task.candidates.map((candidate) => <label className={`candidate ${candidate.public_id === candidateID ? "is-selected" : ""}`} key={candidate.public_id}><input type="radio" name="candidate" value={candidate.public_id} checked={candidate.public_id === candidateID} onChange={() => { setCandidateID(candidate.public_id); setConfirmationID(undefined); }} disabled={!canManage || candidate.status !== "proposed"} /><span><strong>#{candidate.rank} · {candidate.personnel_public_id}</strong><small>{candidate.matched_position_code} · {candidate.matched_capabilities.join("、") || "能力快照未提供"}</small></span><em>{candidate.status}</em></label>)}</div>}</section></div><aside className="action-card"><div><p className="eyebrow">CORE COMMAND</p><h2>{actionTitle}</h2><p>{actionDescription}</p></div>{(canManage || canCancel) && <div className="action-controls">{canManage && <button className="primary-button" disabled={!candidateID || busy !== ""} onClick={confirm}>{busy === "confirm" ? "正在提交…" : confirmationID ? "重试提交" : "受控补派"}</button>}<label>取消原因<input value={reason} onChange={(event) => { setReason(event.target.value); setCancellationID(undefined); }} placeholder="请输入取消原因" maxLength={255} /></label>{canCancel && <button className="danger-button" disabled={!reason.trim() || busy !== ""} onClick={cancel}>{busy === "cancel" ? "正在提交…" : cancellationID ? "重试取消" : "取消任务"}</button>}</div>}</aside></div>;
+  return <div className="module-page task-detail-page"><button className="back-link button-reset" onClick={() => navigate("/tasks")}>← 返回任务工作台</button><div className="detail-heading"><div><p className="eyebrow">FLIGHT / {task.flight_display_no || task.flight_public_id}</p><h1>{task.name}</h1><p className="page-description">{task.area_public_id} · {task.team_public_id} · {task.message || "暂无任务说明"}</p></div><StatusBadge status={task.status} label={taskStatusLabel[task.status]} /></div>{notice && <Notice tone={notice.tone}>{notice.text}</Notice>}<div className="detail-grid"><section className="detail-card"><h2>任务事实</h2><div className="fact-grid"><Fact label="计划时间" value={formatDate(task.planned_at)} /><Fact label="触发类型" value={task.trigger_type || "—"} /><Fact label="状态" value={taskStatusLabel[task.status]} /><Fact label="Task 版本" value={`v${task.status_version}`} /><Fact label="同步版本" value={`s${task.sync_version}`} /><Fact label="岗位要求" value={task.required_position_code || "—"} /><Fact label="能力要求" value={task.required_capabilities.join("、") || "—"} /><Fact label="分配状态" value={task.assignment ? assignmentStatusLabel[task.assignment.status] : "未分配"} /><Fact label="员工收件" value={task.assignment ? receiptStatusLabel[task.assignment.receipt_status] : "—"} /></div></section><section className="detail-card"><h2>候选人员</h2>{task.candidates.length === 0 ? <p className="muted">Core 没有返回候选人员。</p> : <div className="candidate-list">{task.candidates.map((candidate) => <label className={`candidate ${candidate.public_id === candidateID ? "is-selected" : ""}`} key={candidate.public_id}><input type="radio" name="candidate" value={candidate.public_id} checked={candidate.public_id === candidateID} onChange={() => { setCandidateID(candidate.public_id); setConfirmationID(undefined); }} disabled={!canManage || candidate.status !== "proposed"} /><span><strong>#{candidate.rank} · {candidate.personnel_public_id}</strong><small>{candidate.matched_position_code} · {candidate.matched_capabilities.join("、") || "能力快照未提供"}</small></span><em>{candidate.status}</em></label>)}</div>}</section></div><aside className="action-card"><div><p className="eyebrow">CORE COMMAND</p><h2>{actionTitle}</h2><p>{actionDescription}</p></div>{(canManage || canCancel) && <div className="action-controls">{canManage && <button className="primary-button" disabled={!candidateID || busy !== ""} onClick={confirm}>{busy === "confirm" ? "正在提交…" : confirmationID ? "重试提交" : "受控补派"}</button>}<label>取消原因<input value={reason} onChange={(event) => { setReason(event.target.value); setCancellationID(undefined); }} placeholder="请输入取消原因" maxLength={255} /></label>{canCancel && <button className="danger-button" disabled={!reason.trim() || busy !== ""} onClick={cancel}>{busy === "cancel" ? "正在提交…" : cancellationID ? "重试取消" : "取消任务"}</button>}</div>}</aside></div>;
 }
 
 function TaskHistoryPage(): JSX.Element {
@@ -505,6 +550,8 @@ function ExceptionManagementPage(): JSX.Element {
   return <div className="module-page"><div className="page-heading"><div><p className="eyebrow">GOVERNANCE / EXCEPTIONS</p><h1>异常处置</h1><p className="page-description">员工上报先写入 Core 异常事实；管理端在当前 Scope 内确认、解决或驳回，并保留处置审计。</p></div><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新异常</button></div><section className="task-panel"><div className="toolbar"><label>状态<select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">全部状态</option><option value="open">待处理</option><option value="acknowledged">已确认</option><option value="resolved">已解决</option><option value="rejected">已驳回</option></select></label><label>严重程度<select value={severity} onChange={(event) => { setSeverity(event.target.value); setPage(1); }}><option value="">全部等级</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="critical">紧急</option></select></label><span className="scope-inline">Core Scope / {total} 条</span></div>{loading && <div className="panel-state">正在读取 Core 异常…</div>}{message && <div className="panel-state"><Notice tone="error">{message}</Notice></div>}{!loading && !message && items.length === 0 && <div className="panel-state">当前 Scope 没有异常记录。</div>}{!loading && !message && items.length > 0 && <div className="table-scroll"><table><thead><tr><th>时间</th><th>航班 / 任务</th><th>员工</th><th>等级</th><th>类别 / 描述</th><th>状态 / 操作</th></tr></thead><tbody>{items.map((item) => <tr key={item.public_id}><td className="data-number">{formatDate(item.reported_at)}</td><td><strong>{item.flight_display_no || item.flight_public_id}</strong><small>{item.task_public_id}</small></td><td><strong>{item.personnel_name}</strong><small>{item.personnel_public_id}</small></td><td><span className={`exception-severity severity-${item.severity}`}>{item.severity}</span></td><td><strong>{item.category}</strong><small className="exception-description">{item.description}</small></td><td><span className={`exception-status exception-${item.status}`}>{item.status}</span>{item.status === "open" && <button className="text-button light-text-button" disabled={!!busyID} onClick={() => update(item, "acknowledged")}>确认</button>}{(item.status === "open" || item.status === "acknowledged") && <><button className="text-button light-text-button" disabled={!!busyID} onClick={() => update(item, "resolved")}>解决</button><button className="text-button light-text-button" disabled={!!busyID} onClick={() => update(item, "rejected")}>驳回</button></>}</td></tr>)}</tbody></table></div>}{!loading && !message && <ListPager page={page} pageSize={LIST_PAGE_SIZE} total={total} onPageChange={setPage} disabled={loading} />}</section></div>;
 }
 
+// Legacy fallback kept for contract compatibility while the v2 review surface is active.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function TaskChangeRequestsPage(): JSX.Element {
   const access = useAdminAccess();
   const canReview = access.roles.includes("admin") || access.roles.includes("manager");
@@ -533,6 +580,51 @@ function TaskChangeRequestsPage(): JSX.Element {
 
   if (!access.loading && !canReview) return <AccessDeniedPage section="changes" />;
   return <ManagementFrame eyebrow="GOVERNANCE / TASK CHANGES" title="任务变更审批" description="员工或现场只提交申请；审批通过后 Core 在同一事务中变更任务、释放或预留人员，并写入 History、Audit 和 Outbox。员工没有拒绝任务的动作。" message={message}><section className="task-panel"><div className="toolbar"><strong>待审批申请</strong><span className="scope-inline">{total} requests</span><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新</button></div>{loading && <div className="panel-state">正在读取 Core 变更申请…</div>}{!loading && items.length === 0 && <div className="panel-state">当前 Scope 没有待审批变更</div>}{!loading && items.length > 0 && <div className="table-scroll"><table><thead><tr><th>申请时间</th><th>任务</th><th>动作</th><th>原因</th><th>申请人</th><th>操作</th></tr></thead><tbody>{items.map((item) => <tr key={item.public_id}><td className="data-number">{formatDate(item.requested_at)}</td><td><strong>{item.task_public_id}</strong><small>{item.exception_public_id || "现场申请"}</small></td><td>{item.action}{item.target_planned_at && <small>{formatDate(item.target_planned_at)}</small>}</td><td>{item.reason}</td><td>{item.requested_by_public_id}</td><td><button className="text-button light-text-button" disabled={!!busyID} onClick={() => review(item, "approve")}>批准</button><button className="text-button light-text-button" disabled={!!busyID} onClick={() => review(item, "reject")}>驳回</button></td></tr>)}</tbody></table></div>}<ListPager page={page} pageSize={LIST_PAGE_SIZE} total={total} onPageChange={setPage} disabled={loading || !!busyID} /></section></ManagementFrame>;
+}
+
+function TaskChangeRequestsPageV2(): JSX.Element {
+  const access = useAdminAccess();
+  const { version: realtimeVersion } = useAdminRealtime();
+  const canReview = access.roles.includes("admin") || access.roles.includes("manager");
+  const [items, setItems] = useState<CoreTaskChangeRequest[]>([]);
+  const [status, setStatus] = useState<TaskChangeRequestStatus | "">("");
+  const [taskID, setTaskID] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [busyID, setBusyID] = useState<string>();
+  const [message, setMessage] = useState<string>();
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    if (!access.can("exception:read")) return undefined;
+    const controller = new AbortController();
+    setLoading(true); setMessage(undefined);
+    coreApi.listTaskChangeRequests({ status: status || undefined, task_public_id: taskID.trim() || undefined, page, page_size: LIST_PAGE_SIZE }, controller.signal).then((response) => {
+      setItems(response.data.items); setTotal(response.data.total);
+    }).catch((error: unknown) => { if (!controller.signal.aborted) setMessage(readClientError(error)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [access, page, realtimeVersion, reloadKey, status, taskID]);
+
+  async function review(item: CoreTaskChangeRequest, decision: "approve" | "reject"): Promise<void> {
+    if (!canReview || item.status !== "pending") return;
+    const note = window.prompt(decision === "approve" ? "审批备注（可留空）" : "驳回原因", "");
+    if (note === null || (decision === "reject" && !note.trim())) return;
+    setBusyID(item.public_id); setMessage(undefined);
+    try { await coreApi.reviewTaskChangeRequest(item.public_id, { decision, review_note: note.trim() }); setReloadKey((value) => value + 1); }
+    catch (error) { setMessage(readClientError(error)); }
+    finally { setBusyID(undefined); }
+  }
+
+  if (!access.loading && !access.can("exception:read")) return <AccessDeniedPage section="changes" />;
+  return <ManagementFrame eyebrow="GOVERNANCE / TASK CHANGES" title="任务变更" description="员工和队长只能提交受控申请；manager/admin 审批后由 Core 原子应用。页面展示申请状态、应用结果和失败原因。" message={message}>
+    <section className="task-panel"><div className="toolbar"><label>状态<select value={status} onChange={(event) => { setStatus(event.target.value as TaskChangeRequestStatus | ""); setPage(1); }}><option value="">全部状态</option><option value="pending">待审批</option><option value="approved">已批准</option><option value="rejected">已驳回</option><option value="applied">已应用</option><option value="failed">应用失败</option></select></label><label>任务 ID<input value={taskID} onChange={(event) => { setTaskID(event.target.value); setPage(1); }} placeholder="按 task public_id 筛选" /></label><span className="scope-inline">{total} requests · {canReview ? "可审批" : "只读跟进"}</span><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新</button></div>
+      {loading && <div className="panel-state">正在读取 Core 变更申请…</div>}
+      {!loading && !message && items.length === 0 && <div className="panel-state">当前筛选没有变更申请。</div>}
+      {!loading && !message && items.length > 0 && <div className="table-scroll"><table><thead><tr><th>申请时间</th><th>任务</th><th>申请动作</th><th>原因 / 目标</th><th>状态</th><th>审批与应用</th><th>操作</th></tr></thead><tbody>{items.map((item) => <tr key={item.public_id}><td className="data-number">{formatDate(item.requested_at)}</td><td><strong>{item.task_public_id}</strong><small>{item.exception_public_id || "现场申请"}</small></td><td><span>{taskChangeActionLabel[item.action]}</span><small>{item.action}</small></td><td><span>{item.reason}</span>{item.target_candidate_public_id && <small>目标人员：{item.target_candidate_public_id}</small>}{item.target_planned_at && <small>目标时间：{formatDate(item.target_planned_at)}</small>}</td><td><StatusBadge status={item.status} label={taskChangeRequestStatusLabel[item.status]} kind={`change-${item.status}`} /></td><td><small>申请人：{item.requested_by_public_id}</small>{item.reviewed_at && <small>审核：{formatDate(item.reviewed_at)} · {item.reviewed_by_public_id || "—"}</small>}{item.review_note && <small>意见：{item.review_note}</small>}{item.applied_at && <small>应用：{formatDate(item.applied_at)}</small>}{item.failure_reason && <small className="exception-description">失败：{item.failure_reason}</small>}</td><td>{canReview && item.status === "pending" ? <><button className="text-button light-text-button" disabled={!!busyID} onClick={() => void review(item, "approve")}>批准</button><button className="text-button light-text-button" disabled={!!busyID} onClick={() => void review(item, "reject")}>驳回</button></> : <span className="muted">只读</span>}</td></tr>)}</tbody></table></div>}
+      <ListPager page={page} pageSize={LIST_PAGE_SIZE} total={total} onPageChange={setPage} disabled={loading || !!busyID} />
+    </section>
+  </ManagementFrame>;
 }
 
 type DictionaryForm = { code: string; name: string; description: string };
@@ -862,6 +954,8 @@ function ScopesPage(): JSX.Element {
   return <ManagementFrame eyebrow="SYSTEM / SCOPES" title="权限范围" description="Scope 由 Core 会话和 RBAC 计算，管理端只读展示，不提供浏览器侧的本地授权开关。" message={access.error}><section className="detail-card"><div className="toolbar"><strong>当前会话 Scope</strong><button className="secondary-button" onClick={access.refresh}>刷新</button></div>{access.loading && <div className="panel-state">正在读取 Scope…</div>}{!access.loading && access.scope && <div className="fact-grid"><Fact label="Principal" value={access.scope.principal_public_id} /><Fact label="角色" value={access.scope.roles.join(", ") || "—"} /><Fact label="全局" value={access.scope.global ? "是" : "否"} /><Fact label="Area IDs" value={access.scope.area_ids.join(", ") || "—"} /><Fact label="Team IDs" value={access.scope.team_ids.join(", ") || "—"} /></div>}</section></ManagementFrame>;
 }
 
+// Legacy fallback kept for contract compatibility while the v2 diagnostics surface is active.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function DiagnosticsPage(): JSX.Element {
   const [diagnostics, setDiagnostics] = useState<CoreDiagnostics>();
   const [loading, setLoading] = useState(true);
@@ -964,6 +1058,8 @@ function OrganizationPage(): JSX.Element {
   </ManagementFrame>;
 }
 
+// Legacy fallback kept for contract compatibility while the v2 flight surface is active.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function FlightManagementPage(): JSX.Element {
   const [flights, setFlights] = useState<CoreFlight[]>([]);
   const [page, setPage] = useState(1);
@@ -1012,6 +1108,56 @@ function RulesPage(): JSX.Element {
   </ManagementFrame>;
 }
 
+function DiagnosticsPageV2(): JSX.Element {
+  const [diagnostics, setDiagnostics] = useState<CoreDiagnostics>();
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string>();
+  const [reloadKey, setReloadKey] = useState(0);
+  const realtime = useAdminRealtime();
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setMessage(undefined);
+    coreApi.getDiagnostics(controller.signal).then((response) => setDiagnostics(response.data)).catch((error: unknown) => { if (!controller.signal.aborted) setMessage(readClientError(error)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [realtime.version, reloadKey]);
+
+  return <ManagementFrame eyebrow="SYSTEM / DIAGNOSTICS" title="运行诊断" description="诊断信息只读展示 Core 运行配置、可靠同步计数和管理端实时连接；不把 Redis 或实时提示当作业务事实。" message={message}>
+    <section className="detail-card"><div className="toolbar"><h2>连接与运行环境</h2><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新</button></div>{loading && <p className="muted">正在读取诊断信息…</p>}{diagnostics && <div className="fact-grid"><Fact label="组件" value={diagnostics.component} /><Fact label="生成时间" value={formatDate(diagnostics.generated_at)} /><Fact label="数据库" value={diagnostics.database_reachable ? "可连接" : "不可连接"} /><Fact label="环境" value={diagnostics.runtime.environment} /><Fact label="Redis" value={diagnostics.runtime.redis_enabled ? "启用" : "未启用"} /><Fact label="航班源配置" value={diagnostics.runtime.flight_source_configured ? "已配置" : "未配置"} /><Fact label="真实身份源" value={diagnostics.runtime.real_identity_provider ? "已启用" : "未启用"} /><Fact label="开发 Actor Header" value={diagnostics.runtime.development_actor_headers ? "已启用" : "未启用"} /><Fact label="管理实时流" value={`${managementRealtimeStateLabel[realtime.state]}${realtime.lastEventID ? ` · #${realtime.lastEventID}` : ""}`} /></div>}</section>
+    {diagnostics && <section className="detail-card"><h2>可靠同步队列</h2><div className="metric-row"><Metric label="航班源待处理" value={String(diagnostics.sync.flight_source_pending)} /><Metric label="航班源重试" value={String(diagnostics.sync.flight_source_retry)} /><Metric label="航班源失败" value={String(diagnostics.sync.flight_source_failed)} /><Metric label="Outbox 待处理" value={String(diagnostics.sync.outbox_pending)} /><Metric label="Outbox 失败" value={String(diagnostics.sync.outbox_failed)} /><Metric label="Core Inbox 失败" value={String(diagnostics.sync.core_inbox_failed)} /></div></section>}
+  </ManagementFrame>;
+}
+
+function FlightManagementPageV2(): JSX.Element {
+  const [flights, setFlights] = useState<CoreFlight[]>([]);
+  const [operatingDate, setOperatingDate] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string>();
+  const [reloadKey, setReloadKey] = useState(0);
+  const { version: realtimeVersion } = useAdminRealtime();
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setMessage(undefined);
+    coreApi.listFlights({ operating_date: operatingDate || undefined, include_terminal: true, page, page_size: LIST_PAGE_SIZE }, controller.signal).then((response) => {
+      setFlights(response.data.items); setTotal(response.data.total);
+    }).catch((error: unknown) => { if (!controller.signal.aborted) setMessage(readClientError(error)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [operatingDate, page, realtimeVersion, reloadKey]);
+
+  return <ManagementFrame eyebrow="OPERATIONS / FLIGHTS" title="航班运行" description="航班计划和生命周期来自外部 Provider。管理端只读 Core 事实，并同时显示来源健康和实际到达时间。" message={message}>
+    <section className="detail-card"><p className="eyebrow">EXTERNAL SOURCE</p><h2>航班事实只读</h2><p className="page-description">浏览器不提供新增、到达、离港或取消入口。来源失败时继续显示已同步事实，并明确标记来源状态。</p></section>
+    <section className="task-panel"><div className="toolbar"><label>运行日期<input type="date" value={operatingDate} onChange={(event) => { setOperatingDate(event.target.value); setPage(1); }} /></label><span className="scope-inline">{total} flights · 第 {page} 页</span><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新</button></div>
+      {loading && <div className="panel-state">正在读取 Core 航班事实…</div>}
+      {!loading && !message && flights.length === 0 && <div className="panel-state">当前日期没有航班事实。</div>}
+      {!loading && !message && flights.length > 0 && <div className="table-scroll"><table><thead><tr><th>航班</th><th>来源健康</th><th>计划时间</th><th>实际到达</th><th>运行状态</th><th>版本</th></tr></thead><tbody>{flights.map((flight) => <tr key={flight.public_id}><td><strong>{flight.flight_display_no}</strong><small>{flight.operating_date}</small></td><td><span>{flight.source_provider || "—"}</span><small><StatusBadge status={`source-${flight.source_state}`} label={sourceStateLabel[flight.source_state] ?? flight.source_state} kind={`source-${flight.source_state}`} /></small>{flight.source_last_error && <small className="exception-description">{flight.source_last_error}</small>}</td><td>{formatDate(flight.scheduled_at)}<small>最近同步：{formatDate(flight.source_last_synced_at ?? flight.source_last_attempt_at ?? "")}</small></td><td>{formatDate(flight.actual_arrival_at ?? "")}</td><td><StatusBadge status={`flight-${flight.status}`} label={flightStatusLabel[flight.status] ?? flight.status} kind={`flight-${flight.status}`} /><small>最近变更：{formatDate(flight.last_status_changed_at)}</small></td><td className="data-number">v{flight.status_version}</td></tr>)}</tbody></table></div>}
+      <ListPager page={page} pageSize={LIST_PAGE_SIZE} total={total} onPageChange={setPage} disabled={loading} />
+    </section>
+  </ManagementFrame>;
+}
+
 function ReportsPage(): JSX.Element {
   const [report, setReport] = useState<CoreReportOverview>();
   const [filters, setFilters] = useState({ from: "", to: "" });
@@ -1038,15 +1184,47 @@ function ReportsPage(): JSX.Element {
 }
 
 function ReportCard({ title, counts, labels }: { title: string; counts?: Record<string, number>; labels: Record<string, string> }): JSX.Element {
-  return <section className="detail-card report-card"><h2>{title}</h2>{Object.keys(labels).map((key) => <div className="report-row" key={key}><span>{labels[key]}</span><strong>{counts?.[key] ?? 0}</strong></div>)}</section>;
+  const resolvedLabels = title === "任务状态" ? { ...labels, paused: "已暂停" } : title === "Assignment 状态" ? { ...labels, accepted: "历史兼容状态" } : labels;
+  return <section className="detail-card report-card"><h2>{title}</h2>{Object.keys(resolvedLabels).map((key) => <div className="report-row" key={key}><span>{resolvedLabels[key]}</span><strong>{counts?.[key] ?? 0}</strong></div>)}</section>;
 }
 
 function sumCounts(counts?: Record<string, number>): number { return counts ? Object.values(counts).reduce((total, value) => total + value, 0) : 0; }
 
+// Legacy fallback kept for contract compatibility while the v2 assignment surface is active.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function AssignmentManagementPage(): JSX.Element {
   const [assignments, setAssignments] = useState<CoreAssignment[]>([]); const [status, setStatus] = useState(""); const [page, setPage] = useState(1); const [total, setTotal] = useState(0); const [message, setMessage] = useState<string>(); const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => { const controller = new AbortController(); coreApi.listAssignments({ status: status || undefined, page, page_size: LIST_PAGE_SIZE }, controller.signal).then((response) => { setAssignments(response.data.items); setTotal(response.data.total); }).catch((error: unknown) => { if (!controller.signal.aborted) setMessage(readClientError(error)); }); return () => controller.abort(); }, [page, status, reloadKey]);
   return <ManagementFrame eyebrow="TASKS / ASSIGNMENTS" title="任务分配" description="查看系统自动派发的 Assignment、员工收件确认和执行状态。员工不能拒绝任务；冲突通过异常申请进入值班经理/队长处理。" message={message}><section className="task-panel"><div className="toolbar"><label>状态 <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">全部</option><option value="confirmed">已派发</option><option value="accepted">执行中（兼容状态）</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label><span className="scope-inline">{total} assignments</span><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新</button></div><div className="table-scroll"><table><thead><tr><th>航班 / 任务</th><th>员工</th><th>状态</th><th>收件</th><th>计划时间</th><th>版本</th></tr></thead><tbody>{assignments.map((assignment) => <tr key={assignment.public_id}><td><strong>{assignment.flight_display_no}</strong><small>{assignment.task_public_id}</small></td><td><strong>{assignment.personnel_name}</strong><small>{assignment.personnel_employee_no}</small></td><td><StatusBadge status={assignment.status as TaskStatus} /></td><td>{assignment.receipt_status === "received" ? `已收到 · ${formatDate(assignment.received_at ?? "")}` : "待确认收件"}</td><td>{formatDate(assignment.planned_at)}</td><td className="data-number">v{assignment.status_version}</td></tr>)}</tbody></table></div><ListPager page={page} pageSize={LIST_PAGE_SIZE} total={total} onPageChange={setPage} /></section></ManagementFrame>;
+}
+
+function AssignmentManagementPageV2(): JSX.Element {
+  const [assignments, setAssignments] = useState<CoreAssignment[]>([]);
+  const [status, setStatus] = useState("");
+  const [taskID, setTaskID] = useState("");
+  const [personnelID, setPersonnelID] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [message, setMessage] = useState<string>();
+  const [reloadKey, setReloadKey] = useState(0);
+  const { version: realtimeVersion } = useAdminRealtime();
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setMessage(undefined);
+    coreApi.listAssignments({ status: status || undefined, task_public_id: taskID.trim() || undefined, personnel_public_id: personnelID.trim() || undefined, page, page_size: LIST_PAGE_SIZE }, controller.signal).then((response) => {
+      setAssignments(response.data.items); setTotal(response.data.total);
+    }).catch((error: unknown) => { if (!controller.signal.aborted) setMessage(readClientError(error)); });
+    return () => controller.abort();
+  }, [page, personnelID, realtimeVersion, reloadKey, status, taskID]);
+
+  return <ManagementFrame eyebrow="TASKS / ASSIGNMENTS" title="任务分配" description="分配状态与员工收件状态分开展示。系统确认分配后，员工必须先确认收到，再开始执行；员工没有拒绝任务的动作。" message={message}>
+    <section className="task-panel"><div className="toolbar"><label>分配状态<select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">全部</option><option value="confirmed">已分配</option><option value="accepted">历史兼容状态</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label><label>任务 ID<input value={taskID} onChange={(event) => { setTaskID(event.target.value); setPage(1); }} placeholder="按 task public_id 筛选" /></label><label>人员 ID<input value={personnelID} onChange={(event) => { setPersonnelID(event.target.value); setPage(1); }} placeholder="按 personnel public_id 筛选" /></label><span className="scope-inline">{total} assignments</span><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新</button></div>
+      {!message && assignments.length === 0 && <div className="panel-state">当前筛选没有分配记录。</div>}
+      {assignments.length > 0 && <div className="table-scroll"><table><thead><tr><th>航班 / 任务</th><th>员工</th><th>分配状态</th><th>员工收件</th><th>计划时间</th><th>版本</th></tr></thead><tbody>{assignments.map((assignment) => <tr key={assignment.public_id}><td><strong>{assignment.flight_display_no}</strong><small>{assignment.task_public_id}</small></td><td><strong>{assignment.personnel_name}</strong><small>{assignment.personnel_employee_no}</small></td><td><StatusBadge status={`assignment-${assignment.status}`} label={assignmentStatusLabel[assignment.status]} kind={`assignment-${assignment.status}`} /></td><td><StatusBadge status={`receipt-${assignment.receipt_status}`} label={receiptStatusLabel[assignment.receipt_status]} kind={`receipt-${assignment.receipt_status}`} />{assignment.received_at && <small>{formatDate(assignment.received_at)}</small>}{assignment.status === "confirmed" && assignment.receipt_status === "pending" && <small className="exception-description">超过 300 秒可能自动重新分配</small>}</td><td>{formatDate(assignment.planned_at)}</td><td className="data-number">v{assignment.status_version}</td></tr>)}</tbody></table></div>}
+      <ListPager page={page} pageSize={LIST_PAGE_SIZE} total={total} onPageChange={setPage} disabled={!!message} />
+    </section>
+  </ManagementFrame>;
 }
 
 function AdminIdentityManagementPage(): JSX.Element {
@@ -1103,3 +1281,13 @@ function AdminIdentityManagementPage(): JSX.Element {
     <section className="task-panel"><div className="toolbar"><strong>已配置身份</strong><span className="scope-inline">{total} identities</span></div><div className="table-scroll"><table><thead><tr><th>身份</th><th>Provider / Subject</th><th>角色</th><th>Scope</th><th /></tr></thead><tbody>{identities.map((identity) => <tr key={identity.public_id}><td><strong>{identity.display_name}</strong><small>{identity.public_id}</small></td><td>{identity.provider}<small>{identity.external_subject}</small></td><td>{identity.role}</td><td>{identity.global_scope ? "全局" : `${identity.area_ids?.length ?? 0} area / ${identity.team_ids?.length ?? 0} team`}</td><td><button className="text-button light-text-button" disabled={busy} onClick={() => editIdentity(identity)}>编辑</button><button className="text-button light-text-button" disabled={busy} onClick={() => toggle(identity)}>{identity.enabled ? "停用" : "启用"}</button></td></tr>)}</tbody></table></div><ListPager page={page} pageSize={LIST_PAGE_SIZE} total={total} onPageChange={setPage} disabled={busy} /></section>
   </ManagementFrame>;
 }
+
+const managementRealtimeStateLabel: Record<ManagementRealtimeState, string> = {
+  idle: "等待连接",
+  connecting: "正在连接",
+  open: "已连接 Core",
+  retrying: "连接重试中",
+  closed: "实时连接已关闭",
+  unauthorized: "会话已失效",
+  forbidden: "当前角色不可订阅",
+};

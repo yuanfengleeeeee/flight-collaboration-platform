@@ -1,6 +1,7 @@
 import type {
   ApiEnvelope,
   AuthResult,
+  CommandStatus,
   BindingCompleteRequest,
   CommandAccepted,
   CommandStatusView,
@@ -19,6 +20,46 @@ import type { SessionApi, SessionSnapshot, SessionStore } from "@flight/auth";
 
 export class MiniappHttpError extends Error {
   constructor(readonly status: number, readonly body: unknown) { super("miniapp request failed"); }
+}
+
+export type MiniappTaskCommandAction = "receive" | "start" | "complete";
+
+export interface MiniappTaskCommandReceipt {
+  id: string;
+  action: MiniappTaskCommandAction;
+  taskPublicID: string;
+  assignmentPublicID: string;
+  expectedSyncVersion: number;
+  status?: CommandStatus;
+}
+
+export class MiniappTaskCommandStore {
+  constructor(private readonly key: string) {}
+
+  read(taskPublicID?: string): MiniappTaskCommandReceipt | undefined {
+    try {
+      const value = wx.getStorageSync(this.key) as unknown;
+      if (!isMiniappTaskCommandReceipt(value) || (taskPublicID && value.taskPublicID !== taskPublicID)) return undefined;
+      return value;
+    } catch {
+      return undefined;
+    }
+  }
+
+  write(receipt: MiniappTaskCommandReceipt): void {
+    try { wx.setStorageSync(this.key, receipt); } catch { /* local storage is only a recovery hint */ }
+  }
+
+  clear(commandID?: string): void {
+    if (commandID && this.read()?.id !== commandID) return;
+    try { wx.removeStorageSync(this.key); } catch { /* best effort */ }
+  }
+}
+
+function isMiniappTaskCommandReceipt(value: unknown): value is MiniappTaskCommandReceipt {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<MiniappTaskCommandReceipt>;
+  return typeof candidate.id === "string" && (candidate.action === "receive" || candidate.action === "start" || candidate.action === "complete") && typeof candidate.taskPublicID === "string" && typeof candidate.assignmentPublicID === "string" && typeof candidate.expectedSyncVersion === "number" && (candidate.status === undefined || candidate.status === "pending" || candidate.status === "syncing" || candidate.status === "confirmed" || candidate.status === "failed");
 }
 
 export class MiniappEdgeGateway implements SessionApi {

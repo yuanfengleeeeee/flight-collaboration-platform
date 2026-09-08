@@ -389,6 +389,18 @@ export interface CoreDiagnostics {
   sync: { flight_source_pending: number; flight_source_retry: number; flight_source_failed: number; outbox_pending: number; outbox_failed: number; core_inbox_failed: number };
 }
 
+export interface CoreManagementRealtimeEvent {
+  id: number;
+  event_id: string;
+  event_type: string;
+  aggregate_type: string;
+  aggregate_public_id: string;
+  team_id?: number;
+  area_id?: number;
+  occurred_at: string;
+  payload?: unknown;
+}
+
 export interface CoreTaskList {
   items: CoreTask[];
   page: number;

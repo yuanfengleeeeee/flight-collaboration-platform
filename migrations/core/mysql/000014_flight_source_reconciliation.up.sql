@@ -1,0 +1,20 @@
+CREATE TABLE flight_source_reconciliation (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    public_id CHAR(36) NOT NULL,
+    provider VARCHAR(64) NOT NULL,
+    window_from DATETIME(6) NOT NULL,
+    window_to DATETIME(6) NOT NULL,
+    upstream_count INT UNSIGNED NOT NULL DEFAULT 0,
+    core_count INT UNSIGNED NOT NULL DEFAULT 0,
+    pending_apply_count INT UNSIGNED NOT NULL DEFAULT 0,
+    upstream_missing_count INT UNSIGNED NOT NULL DEFAULT 0,
+    core_missing_count INT UNSIGNED NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL,
+    details JSON NULL,
+    checked_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_flight_source_reconciliation_public_id (public_id),
+    KEY idx_flight_source_reconciliation_provider_checked (provider, checked_at),
+    CONSTRAINT chk_flight_source_reconciliation_status CHECK (status IN ('matched', 'pending', 'mismatch'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

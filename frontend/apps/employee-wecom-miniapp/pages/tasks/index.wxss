@@ -1,1 +1,3 @@
 .task-page { padding-bottom: 140rpx; }
+.projection-health { margin: 18rpx 0; padding: 12rpx 16rpx; color: #4c7776; background: #f1f7f5; border: 1rpx solid #d6e8e2; border-radius: 10rpx; font-size: 22rpx; }
+.projection-health.projection-unknown { color: #8b6a2b; background: #fff8e8; border-color: #f0dfb3; }

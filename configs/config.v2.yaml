@@ -61,6 +61,65 @@ sync:
   request_timeout_ms: 3000
   claim_lease_seconds: 30
   assignment_receipt_timeout_seconds: 300
+  # Production deployments must replace the endpoint and mapping values with
+  # the contracted AODB/airline API. Secrets are resolved only from the named
+  # environment variables; they are never stored in this file.
+  flight_source:
+    enabled: false
+    provider: aodb
+    base_url: ""
+    schedules_path: /api/v1/flights/schedules
+    events_path: /api/v1/flights/events
+    from_query: from
+    to_query: to
+    timeout_seconds: 15
+    poll_interval_seconds: 60
+    lookback_minutes: 60
+    lookahead_hours: 24
+    user_agent: flight-collaboration-platform/flight-source
+    auth:
+      type: bearer
+      token_env: FLIGHT_SYNC_FLIGHT_SOURCE_TOKEN
+      api_key_header: X-API-Key
+      username_env: FLIGHT_SYNC_FLIGHT_SOURCE_USERNAME
+      password_env: FLIGHT_SYNC_FLIGHT_SOURCE_PASSWORD
+    schedule_mapping:
+      records_path: data.items
+      external_flight_id: external_flight_id
+      flight_display_no: flight_display_no
+      operating_date: operating_date
+      scheduled_at: scheduled_at
+    event_mapping:
+      records_path: data.items
+      external_event_id: external_event_id
+      external_flight_id: external_flight_id
+      status: status
+      occurred_at: occurred_at
+      actual_arrival_at: actual_arrival_at
+      actual_departure_at: actual_departure_at
+      scheduled_at: scheduled_at
+      reason: reason
+      status_map: {}
+    time_formats:
+      - RFC3339
+      - "2006-01-02 15:04:05"
+    reconciliation:
+      enabled: true
+    alert:
+      enabled: false
+      webhook_url_env: FLIGHT_SYNC_FLIGHT_SOURCE_ALERT_WEBHOOK_URL
+      timeout_seconds: 5
+      on_sync_failure: true
+      on_reconciliation_mismatch: true
+    tls:
+      enabled: false
+      cert_file: ""
+      key_file: ""
+      ca_file: ""
+      client_cert_file: ""
+      client_key_file: ""
+      require_client_cert: false
+      server_name: ""
   tls:
     enabled: false
     cert_file: ""

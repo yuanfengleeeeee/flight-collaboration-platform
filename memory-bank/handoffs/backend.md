@@ -1,6 +1,6 @@
 # 后端任务交接快照
 
-> 更新时间：2026-09-07
+> 更新时间：2026-09-08
 > 状态：当前代码/契约已覆盖主要业务流程；生产配置与专项验收待完成
 
 详细业务流程见 [`docs/business-process-v2.md`](../../docs/business-process-v2.md)，前后端边界见 [`docs/frontend-backend-handoff.md`](../../docs/frontend-backend-handoff.md)。本快照只记录当前接手所需事实，不保留旧阶段草案。
@@ -33,11 +33,14 @@
 ### 航班源
 
 - `internal/integration/flight.Provider` 是外部航班适配器边界。
+- `internal/integration/flight.HTTPJSONProvider` 已实现配置化 HTTP/JSON 拉取：支持 envelope/字段路径、状态映射、时间格式、bearer/API-key/basic 认证和可选 mTLS；凭据通过环境变量解析。
+- Worker 已按 `sync.flight_source` 配置启动定时 Poller，按 UTC 窗口拉取 schedule/event，复用 Inbox → Worker 应用链路。
 - `POST /internal/integration/v1/flight-source/sync` 快速接收规范化 Schedule/Event 并写入 `flight_source_inbox`。
 - `POST /internal/integration/v1/flights/{flightPublicID}/arrival` 是受航班源密钥保护的到达入口。
 - `GET /internal/integration/v1/flight-source/health` 返回 `fresh`、`stale`、`fallback`、`failed` 状态及诊断信息。
 - Worker 负责租约领取、异步应用、指数退避和失败记录；数据库中的前一晚/最近一次预同步事实可在源不可用时继续读取。
-- 真实 AODB/航司 Provider、凭据、定时同步和告警发送渠道尚未配置，开发种子不等于真实接入。
+- `flight_source_reconciliation` 持久化每个拉取窗口的 matched/pending/mismatch 对账结果，并可通过健康接口读取摘要；通用 webhook 告警覆盖拉取失败、对账失败和 mismatch。
+- 真实 AODB/航司接口的最终 URL、字段映射、凭据和告警网关仍待合同资料与正式环境配置，开发种子不等于真实接入。
 
 ### 自动派发
 
@@ -72,9 +75,10 @@
 
 ## 当前未完成
 
-- 真实航班 Provider、字段映射、凭据、定时同步、告警/平台通知和生产 HTTPS 域名。
+- 真实 AODB/航司合同落地后的具体字段映射、生产凭据、正式定时配置、告警/平台通知和生产 HTTPS 域名。
 - 正式员工/管理员主数据预置、真实个人微信/企业微信联调和管理端 SSO 上线配置。
 - 全部当前 migration 的正式部署验收，以及多副本、网络分区、重启恢复专项门禁。
+- API/Gateway/Worker 运行时的完整隔离验收，以及对账/告警链路在运行时的 Probe 验收；迁移专用隔离项目已完成 Core `000010–000014`、Edge `000007` 应用和 schema 复核。
 - 代表性数据规模下的 API、数据库、Worker、Outbox/Inbox、Projection lag p50/p95/p99 基线。
 
 ## 验证纪律
@@ -85,4 +89,4 @@
 powershell -ExecutionPolicy Bypass -File scripts/ensure-docker.ps1
 ```
 
-推荐入口：`powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all`。文档修订阶段不应用 migration、不清理数据库、不停止已有服务。`origin/agent/foundation-and-handoff` 已同步到 `f2a8d1e`；最终交接状态提交因 GitHub TLS EOF 未推送，网络恢复后可正常重试。
+推荐入口：`powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all`。文档修订阶段不应用 migration、不清理数据库、不停止已有服务；迁移专项和 Docker 资源清理使用独立项目及精确资源名单执行。

@@ -3,9 +3,10 @@ import { commandStatusLabel, taskStatusLabel } from "@flight/task-domain";
 import { useEffect } from "react";
 import type { ReactElement, ReactNode } from "react";
 
-export function StatusBadge({ status }: { status: TaskStatus | string }): ReactElement {
-  const label = taskStatusLabel[status as TaskStatus] ?? status;
-  return <span className={`status-badge status-${status}`}><span aria-hidden="true">●</span>{label}</span>;
+export function StatusBadge({ status, label, kind }: { status: TaskStatus | string; label?: string; kind?: string }): ReactElement {
+  const resolvedLabel = label ?? taskStatusLabel[status as TaskStatus] ?? status;
+  const resolvedKind = kind ?? status;
+  return <span className={`status-badge status-${resolvedKind}`}><span aria-hidden="true">●</span>{resolvedLabel}</span>;
 }
 
 export function CommandBadge({ status }: { status: CommandStatus }): ReactElement {

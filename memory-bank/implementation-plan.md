@@ -14,7 +14,7 @@
 
 | 能力 | 状态 | 当前合同 |
 | --- | --- | --- |
-| 航班源同步 | `IMPLEMENTED / ACCEPTANCE_PENDING` | 外部 Provider → `flight_source_inbox` → Worker 应用；支持 fresh/stale/fallback/failed、重试和诊断 |
+| 航班源同步 | `IMPLEMENTED / CONTRACT_PENDING` | 已有配置化 HTTP/JSON Provider、凭据环境变量、定时拉取、字段/状态映射、Inbox 应用、对账报告和 webhook 告警；仍需按真实 AODB/航司合同填入最终配置并联调 |
 | 航班事实 | `IMPLEMENTED / EXTERNAL_ONLY` | 管理端只读；开发种子航班仅为夹具，不提供生产手工航班 CRUD |
 | 到达生成任务 | `IMPLEMENTED` | 到达按模板生成 `pending_dispatch`，使用生成幂等键 |
 | 自动预分配 | `IMPLEMENTED / RULES_FROZEN_V1` | 按启用、区域/主班组、岗位、能力、idle、时间冲突过滤；稳定排序并记录候选快照 |
@@ -48,9 +48,13 @@
 
 ## 4. 待完成实施顺序
 
+### 开发环境容器化基线
+
+本地开发/测试容器生命周期已统一：`flight-dev` 固定复用日常开发容器和 Core/Edge named Volume，`flight-test` 固定复用独立测试 Volume，危险/版本测试通过 `flight-danger-*` 创建全新项目和 Volume。`app` 容器内打包前后端运行进程、Gateway 及两个 Web 前端；MySQL/Redis 仍为带 Volume 的独立基础服务。脚本会显式执行 migration 并调用随机种子扩充开发/测试数据。
+
 ### P1：外部航班接口资料落地
 
-收到 AODB/航空公司接口资料后，完成字段映射、认证凭据注入、定时同步、对账、告警渠道和 Provider 联调。Provider 失败时必须继续使用已预同步事实，并能观察 retry/fallback/failed。
+配置化 HTTP/JSON Provider、认证环境变量、定时拉取、持久化对账报告和通用 webhook 告警已落地。收到 AODB/航空公司接口资料后，还需替换占位字段映射、注入正式凭据、配置告警渠道并完成 Provider 联调。Provider 失败时必须继续使用已预同步事实，并能观察 retry/fallback/failed。
 
 ### P2：隔离环境验收
 

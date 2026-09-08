@@ -58,6 +58,7 @@ func main() {
 	var commandProcessor integrationsync.CommandProcessor = coreStore
 	var flightSyncService *coreflightsync.Service
 	var receiptTimeoutReassigner *coreflighttask.ReceiptTimeoutReassigner
+	var flightSourcePoller *coreflightsync.Poller
 	if db != nil {
 		commandProcessor = coremysql.NewFlightTaskRepository(db)
 		repository := coremysql.NewFlightTaskRepository(db)
@@ -66,6 +67,28 @@ func main() {
 		arrivalService.SetAutomaticDispatcher(coreflighttask.NewAutomaticDispatcher(confirmationService, nil))
 		flightSyncService = coreflightsync.NewService(coremysql.NewFlightSourceRepository(db), arrivalService, clock.Real{})
 		receiptTimeoutReassigner = coreflighttask.NewReceiptTimeoutReassigner(repository)
+	}
+	if db != nil && cfg.Sync.FlightSource.Enabled {
+		provider, providerErr := newConfiguredFlightSourceProvider(cfg.Sync.FlightSource)
+		if providerErr != nil {
+			log.Error("configure flight source provider failed", zap.Error(providerErr))
+		} else {
+			notifier, notifierErr := newFlightSourceNotifier(cfg.Sync.FlightSource)
+			if notifierErr != nil {
+				log.Error("configure flight source alert notifier failed", zap.Error(notifierErr))
+			} else {
+				flightSourcePoller = coreflightsync.NewPoller(
+					flightSyncService,
+					provider,
+					time.Duration(cfg.Sync.FlightSource.PollIntervalSeconds)*time.Second,
+					time.Duration(cfg.Sync.FlightSource.LookbackMinutes)*time.Minute,
+					time.Duration(cfg.Sync.FlightSource.LookaheadHours)*time.Hour,
+				).SetLogger(log).SetNotifier(notifier).
+					SetReconciliationEnabled(cfg.Sync.FlightSource.Reconciliation.Enabled).
+					SetAlertPolicy(cfg.Sync.FlightSource.Alert.OnSyncFailure, cfg.Sync.FlightSource.Alert.OnReconciliationMismatch)
+				go flightSourcePoller.Run(ctx)
+			}
+		}
 	}
 	transport, err := integrationsync.NewHTTPTransportWithTLS(cfg.Sync.EdgeBaseURL, time.Duration(cfg.Sync.RequestTimeoutMS)*time.Millisecond, cfg.Sync.TLS)
 	if err != nil {

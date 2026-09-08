@@ -83,13 +83,47 @@ const (
 )
 
 type SourceHealth struct {
-	Provider        string      `json:"provider"`
-	State           SourceState `json:"state"`
-	LastAttemptAt   *time.Time  `json:"last_attempt_at,omitempty"`
-	LastSuccessAt   *time.Time  `json:"last_success_at,omitempty"`
-	LastFailureAt   *time.Time  `json:"last_failure_at,omitempty"`
-	LastError       string      `json:"last_error,omitempty"`
-	FallbackEnabled bool        `json:"fallback_enabled"`
+	Provider                   string      `json:"provider"`
+	State                      SourceState `json:"state"`
+	LastAttemptAt              *time.Time  `json:"last_attempt_at,omitempty"`
+	LastSuccessAt              *time.Time  `json:"last_success_at,omitempty"`
+	LastFailureAt              *time.Time  `json:"last_failure_at,omitempty"`
+	LastError                  string      `json:"last_error,omitempty"`
+	FallbackEnabled            bool        `json:"fallback_enabled"`
+	LastReconciliationAt       *time.Time  `json:"last_reconciliation_at,omitempty"`
+	LastReconciliationStatus   string      `json:"last_reconciliation_status,omitempty"`
+	LastReconciliationMismatch int         `json:"last_reconciliation_mismatch_count,omitempty"`
+}
+
+type SyncWindowResult struct {
+	StageResult
+	Schedules []flightintegration.Schedule `json:"-"`
+	Events    []flightintegration.Event    `json:"-"`
+}
+
+type ReconciliationResult struct {
+	PublicID             string    `json:"public_id"`
+	Provider             string    `json:"provider"`
+	WindowFrom           time.Time `json:"window_from"`
+	WindowTo             time.Time `json:"window_to"`
+	UpstreamCount        int       `json:"upstream_count"`
+	CoreCount            int       `json:"core_count"`
+	PendingApplyCount    int       `json:"pending_apply_count"`
+	UpstreamMissingCount int       `json:"upstream_missing_count"`
+	CoreMissingCount     int       `json:"core_missing_count"`
+	UpstreamMissingIDs   []string  `json:"upstream_missing_ids,omitempty"`
+	CoreMissingIDs       []string  `json:"core_missing_ids,omitempty"`
+	PendingApplyIDs      []string  `json:"pending_apply_ids,omitempty"`
+	Status               string    `json:"status"`
+	CheckedAt            time.Time `json:"checked_at"`
+}
+
+type ReconciliationRepository interface {
+	ReconcileSchedules(context.Context, string, time.Time, time.Time, []flightintegration.Schedule, time.Time) (ReconciliationResult, error)
+}
+
+type ReconciliationHealthRepository interface {
+	LatestReconciliation(context.Context, string) (ReconciliationResult, error)
 }
 
 type Repository interface {
@@ -168,8 +202,13 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (StageResult, e
 }
 
 func (s *Service) SyncWindow(ctx context.Context, provider flightintegration.Provider, from, to time.Time) (StageResult, error) {
+	result, err := s.SyncWindowWithRecords(ctx, provider, from, to)
+	return result.StageResult, err
+}
+
+func (s *Service) SyncWindowWithRecords(ctx context.Context, provider flightintegration.Provider, from, to time.Time) (SyncWindowResult, error) {
 	if provider == nil || from.IsZero() || to.IsZero() || !to.After(from) {
-		return StageResult{}, ErrInvalidInput
+		return SyncWindowResult{}, ErrInvalidInput
 	}
 	providerName := strings.ToLower(strings.TrimSpace(provider.Name()))
 	attemptedAt := s.clock.Now().UTC()
@@ -179,18 +218,57 @@ func (s *Service) SyncWindow(ctx context.Context, provider flightintegration.Pro
 	schedules, err := provider.ListSchedules(ctx, from.UTC(), to.UTC())
 	if err != nil {
 		s.recordProviderFailure(ctx, providerName, attemptedAt, err)
-		return StageResult{}, fmt.Errorf("list schedules from %s: %w", provider.Name(), err)
+		return SyncWindowResult{}, fmt.Errorf("list schedules from %s: %w", provider.Name(), err)
 	}
 	events, err := provider.ListEvents(ctx, from.UTC(), to.UTC())
 	if err != nil {
 		s.recordProviderFailure(ctx, providerName, attemptedAt, err)
-		return StageResult{}, fmt.Errorf("list events from %s: %w", provider.Name(), err)
+		return SyncWindowResult{}, fmt.Errorf("list events from %s: %w", provider.Name(), err)
+	}
+	if len(schedules)+len(events) == 0 {
+		if health, ok := s.repository.(HealthRepository); ok {
+			_ = health.RecordSourceSuccess(ctx, providerName, attemptedAt)
+		}
+		return SyncWindowResult{Schedules: schedules, Events: events}, nil
 	}
 	result, err := s.Ingest(ctx, IngestInput{Provider: provider.Name(), Schedules: schedules, Events: events, Now: attemptedAt})
 	if err != nil {
 		s.recordProviderFailure(ctx, providerName, attemptedAt, err)
 	}
-	return result, err
+	return SyncWindowResult{StageResult: result, Schedules: schedules, Events: events}, err
+}
+
+func (s *Service) ReconcileSchedules(ctx context.Context, provider string, from, to time.Time, schedules []flightintegration.Schedule, checkedAt time.Time) (ReconciliationResult, error) {
+	if s == nil || s.repository == nil {
+		return ReconciliationResult{}, ErrRepositoryNotConfigured
+	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if !providerPattern.MatchString(provider) || provider == "manual" || from.IsZero() || to.IsZero() || !to.After(from) {
+		return ReconciliationResult{}, ErrInvalidInput
+	}
+	if checkedAt.IsZero() {
+		checkedAt = s.clock.Now().UTC()
+	}
+	repository, ok := s.repository.(ReconciliationRepository)
+	if !ok {
+		return ReconciliationResult{}, ErrRepositoryNotConfigured
+	}
+	return repository.ReconcileSchedules(ctx, provider, from.UTC(), to.UTC(), schedules, checkedAt.UTC())
+}
+
+func (s *Service) LatestReconciliation(ctx context.Context, provider string) (ReconciliationResult, error) {
+	if s == nil || s.repository == nil {
+		return ReconciliationResult{}, ErrRepositoryNotConfigured
+	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if !providerPattern.MatchString(provider) || provider == "manual" {
+		return ReconciliationResult{}, ErrInvalidInput
+	}
+	repository, ok := s.repository.(ReconciliationHealthRepository)
+	if !ok {
+		return ReconciliationResult{}, ErrRepositoryNotConfigured
+	}
+	return repository.LatestReconciliation(ctx, provider)
 }
 
 func (s *Service) SourceHealth(ctx context.Context, provider string) (SourceHealth, error) {
@@ -211,6 +289,16 @@ func (s *Service) SourceHealth(ctx context.Context, provider string) (SourceHeal
 	}
 	if value.State == SourceFresh && value.LastSuccessAt != nil && s.clock.Now().UTC().Sub(value.LastSuccessAt.UTC()) > defaultFreshnessWindow {
 		value.State = SourceStale
+	}
+	if reconciliation, ok := s.repository.(ReconciliationHealthRepository); ok {
+		if latest, reconciliationErr := reconciliation.LatestReconciliation(ctx, provider); reconciliationErr == nil {
+			if !latest.CheckedAt.IsZero() {
+				checkedAt := latest.CheckedAt
+				value.LastReconciliationAt = &checkedAt
+				value.LastReconciliationStatus = latest.Status
+				value.LastReconciliationMismatch = latest.UpstreamMissingCount + latest.CoreMissingCount
+			}
+		}
 	}
 	return value, nil
 }

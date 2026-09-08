@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EdgeTaskProjection } from "@flight/contracts";
-import { canComplete, canReceive, canStart, createClientID, projectionStatus, suggestedChangeActionForExceptionCategory } from "./index";
+import { canComplete, canReceive, canStart, changeActionsForTaskStatus, createClientID, projectionStatus, suggestedChangeActionForExceptionCategory } from "./index";
 
 const projection: EdgeTaskProjection = {
   public_id: "task-1",
@@ -37,6 +37,12 @@ describe("task display domain", () => {
   it("only suggests safe exception actions from explicit categories", () => {
     expect(suggestedChangeActionForExceptionCategory("保障冲突（申请重新预分配）")).toBe("reassign");
     expect(suggestedChangeActionForExceptionCategory("航班取消（申请取消任务）")).toBe("cancel");
-    expect(suggestedChangeActionForExceptionCategory("航班延误（申请调整任务）")).toBeUndefined();
+    expect(suggestedChangeActionForExceptionCategory("航班延误（申请调整任务）")).toBe("reschedule");
+  });
+
+  it("limits change requests to the current task lifecycle", () => {
+    expect(changeActionsForTaskStatus("assigned")).toEqual(["pause", "reassign", "reschedule", "cancel"]);
+    expect(changeActionsForTaskStatus("paused")).toEqual(["resume"]);
+    expect(changeActionsForTaskStatus("completed")).toEqual([]);
   });
 });

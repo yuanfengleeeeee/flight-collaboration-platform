@@ -599,3 +599,50 @@
 - 验收发现并修复用户与角色页面在 `area_ids/team_ids` 为 JSON `null` 时的白屏；Core 现在将 Scope/管理身份空数组稳定编码为 `[]`，前端同时保留空值兼容。修复后 admin 用户与角色页面可正常显示，Scope 页面三个角色均正常。
 - 实际浏览器用例通过：`E2E_ROLE_MATRIX=true E2E_ADMIN_ROLE_URL=http://127.0.0.1:4176 E2E_MANAGER_ROLE_URL=http://127.0.0.1:4174 E2E_LEADER_ROLE_URL=http://127.0.0.1:4178 pnpm.cmd exec playwright test e2e/admin-role-matrix.spec.ts`，结果 1/1。
 - 修复后再次通过 Docker preflight、Go 全量测试/构建、前端 typecheck/lint/test（14/14）/build、`scripts/verify.ps1 -Mode all` 和 `git diff --check`。未执行表单提交、数据库清理、迁移回滚或 Git 提交推送。
+
+## 2026-09-07 航班源 Provider 配置化与隔离验收入口
+
+
+- 已新增 `internal/integration/flight.HTTPJSONProvider`：支持 AODB/航司 HTTP/JSON envelope、字段路径、状态映射、时间格式、bearer/API-key/basic 认证、请求窗口和可选 mTLS；凭据只从配置指定的环境变量读取，不进入 YAML、日志或 Core 领域。
+- Worker 已接入 `sync.flight_source` 配置和定时 Poller；每个 UTC 窗口拉取 schedule/event，继续通过 Core `flight_source_inbox` 异步应用，并保留失败、重试、fallback 语义。
+- 已新增 Core migration `000014_flight_source_reconciliation` 和 SQL 对账仓储；每次窗口生成 `matched/pending/mismatch` 报告，健康接口暴露最近一次摘要；新增通用 JSON webhook 告警覆盖拉取失败、对账失败和 mismatch。
+- 已新增 `scripts/acceptance-backend.ps1`：使用独立 Compose project/端口/volume，应用 Core/Edge migration，断言 Core `000010–000014` 与 Edge `000007`，等待 API ready，并执行 SQL/HTTP at-least-once Probe；脚本不调用 `down -v`。
+- 本轮 `go test ./...` 和 `go build ./...` 在获得宿主 Go cache 访问权限后均通过，`gofmt` 和 `git diff --check` 通过。普通沙箱中的 Go cache 曾因 Access denied 失败，不能归因于代码。
+- Docker 前置 `scripts/ensure-docker.ps1` 实际失败，原因是当前环境找不到 Docker Desktop/CLI 文件，因此本轮没有应用 migration、启动 Compose、运行 `cmd/migrate` 状态检查或 SQL/HTTP 隔离验收。真实 AODB/航司合同的最终 URL、字段映射、凭据和告警网关仍待注入，尚未宣称真实 Provider 联调完成。
+
+## 2026-09-08 后端 Provider 交付复核
+
+- 复核实际通过：定向 Provider/同步/对账/配置/迁移器测试、全仓 `go test ./...`、`go build ./cmd/worker ./cmd/core-api ./cmd/migrate`、`gofmt` 和 `git diff --check`。
+- Docker 前置再次失败，仍为当前环境找不到 Docker Desktop/CLI；因此 Core `000010–000014`、Edge `000007` 尚未在隔离数据库中应用或验证，`scripts/acceptance-backend.ps1` 也未启动 Compose。
+- 当前交付边界保持为可配置 HTTP/JSON Provider 与验收自动化入口；真实 AODB/航司的最终接口合同、字段映射、凭据和告警网关尚未提供，不能宣称真实供应商联调完成。
+
+## 2026-09-08 Docker Desktop 按需启动与 Codex 前置修复
+
+- 隔离迁移专项复核已通过：独立项目 `flight-backend-migration-acceptance` 的 Core/Edge MySQL 均 healthy；Core `000001–000014`、重点 `000010–000013`，以及 Edge `000001–000007`（含 `000007`）均为 `applied`，并通过只读 schema 检查确认任务收件、航班源健康/对账和 Edge 收件字段存在。
+- 完整 `scripts/acceptance-backend.ps1` 仍因 `nginx:1.27-alpine` 从 Docker Hub 拉取返回 `EOF`，未启动 API/Gateway/Worker 运行时 Probe；隔离迁移数据库项目保留运行，未执行清理或回滚。
+
+- 宿主机 Docker Desktop 已确认正常运行：Docker Client/Server `29.6.2`、Compose `v5.3.1`、`desktop-linux` Context、WSL2 `docker-desktop=Running`。
+- 宿主 Docker Desktop 设置保持 `AutoStart: false`，不随 Windows 登录启动；项目验证需要 Engine 时由 `ensure-docker.ps1` 按需启动 Docker Desktop/Engine。未切换 Context、未开启明文 TCP、未删除容器或数据。
+- `scripts/ensure-docker.ps1` 现在用轻量 `docker version` 探针，优先调用 `docker desktop start --detach`，并从注册表和常见目录发现 Docker Desktop；超时错误会包含 CLI、Context 和 Engine 诊断。
+- 修改后实际运行 `scripts/verify.ps1 -Mode all -DockerTimeoutSeconds 30`，退出码 `0`；Go 测试、Go 构建、Compose 配置和 `git diff --check` 均通过。
+- 普通 Codex 沙箱仍可能无法访问宿主用户的 Docker 命名管道；需要 Docker 集成验证时应使用宿主权限上下文。该环境边界不是项目代码可穿透的 Docker 配置项。
+- 已新增项目级 `.codex/rules/docker.rules`：仅允许标准 `ensure-docker.ps1` 和 `verify.ps1` 入口在宿主权限上下文运行，使普通 Codex 沙箱验证可访问 Docker Desktop 命名管道；未授予所有命令的完全开放权限。规则生效前需重启 Codex。
+
+## 2026-09-08 开发/测试容器生命周期统一
+
+- 新增 `deployments/local/docker-compose.dev.yml` 和 `Dockerfile.all-in-one`：固定 `flight-dev`/`flight-test` 单 `app` 容器包含前后端、Gateway、Worker；Core/Edge MySQL 与 Redis 为独立 named Volume。
+- 新增 `scripts/dev-up.ps1`、`scripts/test-up.ps1`、`scripts/dangerous-test-up.ps1`，启动后显式迁移并以随机 seed 扩充数据；PowerShell 语法和 Compose config 通过。
+- all-in-one image build 被 Docker Hub 对 `node:22-bookworm-slim`、`nginx:1.27-alpine`、`golang:1.25` 的 EOF 阻塞；本轮没有启动新的 dev/test app 容器。
+
+## 2026-09-08 flight-dev 依赖容器启动
+
+- Docker 前置检查通过；执行 `scripts/dev-up.ps1` 时，`flight-dev-app` 构建仍因 Docker Hub 基础镜像 metadata EOF 失败。
+- 为完成安全的部分启动，已创建并启动 `flight-dev-core-mysql-1`、`flight-dev-edge-mysql-1`、`flight-dev-edge-redis-1`，三者均已达到 healthy；对应 Volume 为 `flight-dev_core_mysql_data`、`flight-dev_edge_mysql_data`、`flight-dev_edge_redis_data`。
+- `app` 尚未启动，因此 Core/Edge migration 和随机 seed 尚未执行；没有清理或修改其他 Compose 项目、容器和 Volume。
+
+## 2026-09-08 交接前 Docker 资源收口
+
+- `flight-dev` 资源已按固定项目收口：当前仅保留 `flight-dev` 的 4 个容器、`flight-dev-app` 及其 MySQL/Redis 依赖镜像。
+- 仅保留 `flight-dev_core_mysql_data`、`flight-dev_edge_mysql_data`、`flight-dev_edge_redis_data` 三个 named Volume；26 个非 `flight-dev` Volume 已按明确授权删除，旧测试/验收数据库数据不可恢复。
+- 只读复核结果：Images `3` / `1.456GB`，Local Volumes `3` / `430.3MB`，Build Cache `0B`；4 个 `flight-dev` 容器当前均为 `Exited (255)`，未报告 OOM。
+- 重新启动日常开发环境使用 `scripts/dev-up.ps1`；本次交接没有执行 `docker compose down -v`、migration down、DROP 或 TRUNCATE。

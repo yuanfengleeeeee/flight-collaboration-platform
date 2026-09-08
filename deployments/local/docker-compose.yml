@@ -56,7 +56,7 @@ services:
       FLIGHT_IDENTITY_INTERNAL_API_KEY: change-me-local-identity-key
     depends_on:
       core-mysql: {condition: service_healthy}
-    ports: ["8081:8081"]
+    ports: ["${CORE_API_HOST_PORT:-8081}:8081"]
 
   edge-api:
     build:

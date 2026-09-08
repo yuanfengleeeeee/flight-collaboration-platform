@@ -47,11 +47,14 @@ Handler 不直接调用 GORM；Service 不依赖 Gin；Domain 不依赖 Gin/GORM
 ### 航班同步
 
 - 适配边界：`internal/integration/flight.Provider`。
+- Worker 已提供可替换的 `HTTPJSONProvider`，通过配置声明 JSON envelope、字段路径、状态映射、时间格式和 bearer/API-key/basic 认证；凭据只从环境变量读取，并支持可选 mTLS。
+- Worker 按配置窗口定时拉取 schedule/event，先写入 Inbox，再由既有异步应用链路处理；真实 AODB/航司的 URL、字段和凭据必须由接口合同注入，不能用开发种子代替。
 - 批量接收：`POST /internal/integration/v1/flight-source/sync`。
 - 单航班到达：`POST /internal/integration/v1/flights/{flightPublicID}/arrival`，受 `X-Flight-Source-Key` 保护。
 - 健康诊断：`GET /internal/integration/v1/flight-source/health`。
 - 源记录先写入 Core `flight_source_inbox`，按 `provider + record_type + external_record_id` 幂等；Worker 异步应用到航班事实。
 - 来源状态为 `fresh`、`stale`、`fallback`、`failed`。接口失败时重试并保留错误诊断，继续读取前一晚已预同步的数据库事实；不把 fallback 伪装为实时成功。
+- 每个拉取窗口都会生成 Core `flight_source_reconciliation` 对账报告；结果为 `matched`、`pending` 或 `mismatch`，可汇总到健康接口，并通过可配置 JSON webhook 发出失败/不一致告警。
 
 ## 任务、派发与握手
 
@@ -60,6 +63,13 @@ Handler 不直接调用 GORM；Service 不依赖 Gin；Domain 不依赖 Gin/GORM
 - 排序为 `last_state_changed_at ASC`，再按候选公共 ID 升序。候选快照随任务保存，自动派发和超时重派使用同一快照与规则。
 - 预留冲突只使当前候选失效并继续尝试；没有候选时任务保持可见并标记短缺，不静默取消。
 - 员工收件超时默认 300 秒。Worker 锁定并复核后释放旧预留，再按相同规则尝试替补。
+
+## 开发容器与测试生命周期
+
+- 日常开发使用固定 Compose 项目 `flight-dev`：一个 `app` 容器内运行 Core API、Edge API、Worker、Gateway、Admin Web 和 Employee Web；Core/Edge MySQL 与 Edge Redis 仍使用独立容器。
+- 普通测试使用固定 Compose 项目 `flight-test`，只复用自己的 Core/Edge 数据库 Volume，不与日常开发共享。
+- 危险测试和版本迁移测试使用 `flight-danger-*` 新 Compose 项目和新 named Volume；脚本不会默认清理项目。
+- 所有数据库和 Redis 数据均通过 named Volume 持久化。该单应用容器布局只用于本地开发/测试，不改变生产样式 Compose 的 Core/Edge 服务拆分和数据库边界。
 
 三层握手：
 
@@ -90,7 +100,7 @@ Handler 不直接调用 GORM；Service 不依赖 Gin；Domain 不依赖 Gin/GORM
 
 - Core migration：`migrations/core/mysql`。
 - Edge migration：`migrations/edge/mysql`。
-- 当前业务增量包含 Core `000010`（派发/收件）、`000011`（任务变更）、`000012`（航班源健康）、`000013`（supervisor），以及 Edge `000007`（收件投影）。
+- 当前业务增量包含 Core `000010`（派发/收件）、`000011`（任务变更）、`000012`（航班源健康）、`000013`（supervisor）、`000014`（航班源对账），以及 Edge `000007`（收件投影）。
 - migration 文件存在不等于数据库已应用；状态必须通过 `cmd/migrate -target core|edge -command status` 的实际输出确认。
 
 ## 验证规则

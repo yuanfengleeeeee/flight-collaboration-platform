@@ -1,6 +1,6 @@
 # 前端任务交接快照
 
-> 更新时间：2026-09-07
+> 更新时间：2026-09-08
 > 状态：四端当前页面与 API 接入已落地；真实平台发布和专项验收待完成
 
 业务流程唯一说明：[`docs/business-process-v2.md`](../../docs/business-process-v2.md)。前后端接口边界：[`docs/frontend-backend-handoff.md`](../../docs/frontend-backend-handoff.md)。
@@ -28,6 +28,8 @@ assigned
 ```
 
 前端对员工 Command 使用稳定 `command_id` 和 `expected_sync_version`。Edge 返回 `202` 时只显示 `pending/syncing`，再通过公开 Command 状态接口恢复 `confirmed/failed`。员工遇到正在保障其他航班、延误、取消或突发事件时，在异常页面提交 `pause/reassign/reschedule/cancel/resume` 请求；员工不能直接改任务，也没有拒绝按钮。
+
+Command 进入 `confirmed` 后，员工端会等待 Edge Projection 的同步版本和目标状态收敛，再刷新任务详情，避免 Worker 已处理命令但 Projection 尚未完成回投时出现旧状态或残留锁。
 
 ## 管理端语义
 
@@ -61,5 +63,6 @@ assigned
 ## 已执行验证
 
 - 前端 `typecheck`、`lint`、`test`（14/14）和 Web `build` 已通过；小程序打包检查已通过。
+- 最新前端复核中，`typecheck`、`test`（5 个文件/16 个测试）和 `build:miniapps` 已通过；Web `build`、`lint` 结果保持通过。
 - `admin-pagination.spec.ts` 管理集合分页 Contract 和 `admin-role-matrix.spec.ts` 角色矩阵浏览器验收各通过 1/1。
 - 最新验证前均已执行 Docker preflight；本快照不把 Mock Provider、开发种子或单机 Socket 验收写成生产完成。

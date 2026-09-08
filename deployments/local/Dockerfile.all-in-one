@@ -1,0 +1,42 @@
+FROM golang:1.25 AS go-build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/core-api ./cmd/core-api \
+    && CGO_ENABLED=0 go build -o /out/edge-api ./cmd/edge-api \
+    && CGO_ENABLED=0 go build -o /out/worker ./cmd/worker \
+    && CGO_ENABLED=0 go build -o /out/migrate ./cmd/migrate \
+    && CGO_ENABLED=0 go build -o /out/seed ./cmd/seed
+
+FROM node:22-bookworm-slim AS frontend-build
+
+WORKDIR /src/frontend
+COPY frontend ./
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+ENV VITE_ENABLE_DEV_ACTOR=true
+RUN pnpm install --frozen-lockfile \
+    && pnpm --filter @flight/admin-web build \
+    && pnpm --filter @flight/employee-web build
+
+FROM nginx:1.27-alpine
+
+RUN apk add --no-cache ca-certificates
+
+WORKDIR /app
+COPY --from=go-build /out/core-api /app/bin/core-api
+COPY --from=go-build /out/edge-api /app/bin/edge-api
+COPY --from=go-build /out/worker /app/bin/worker
+COPY --from=go-build /out/migrate /app/bin/migrate
+COPY --from=go-build /out/seed /app/bin/seed
+COPY configs/config.example.yaml /app/config.yaml
+COPY migrations /app/migrations
+COPY --from=frontend-build /src/frontend/apps/admin-web/dist /app/frontend/admin
+COPY --from=frontend-build /src/frontend/apps/employee-web/dist /app/frontend/employee
+COPY deployments/local/all-in-one-nginx.conf /etc/nginx/nginx.conf
+COPY deployments/local/all-in-one-entrypoint.sh /usr/local/bin/all-in-one-entrypoint.sh
+RUN chmod +x /usr/local/bin/all-in-one-entrypoint.sh
+
+EXPOSE 4174 4175 8081 8082 9090
+ENTRYPOINT ["/usr/local/bin/all-in-one-entrypoint.sh"]

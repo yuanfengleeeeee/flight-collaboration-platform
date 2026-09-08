@@ -5,7 +5,10 @@ memory-bank
 web-admin
 miniapp
 api
-migrations
+frontend/**/node_modules/
+frontend/**/dist/
+frontend/**/coverage/
+.codex/
 *.md
 *.err
 *.log

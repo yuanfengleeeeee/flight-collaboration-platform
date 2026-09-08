@@ -45,7 +45,7 @@ Core 是航班、人员、岗位、能力、任务、Assignment、事件、规�
 
 ## 3. 航班事实与同步
 
-航班只能由外部 Provider 提供。Provider 适配器位于 `internal/integration/flight.Provider` 边界，当前代码提供同步接收位置，但真实 AODB/航司适配器、凭据和生产定时配置仍待外部资料。
+航班只能由外部 Provider 提供。Provider 适配器位于 `internal/integration/flight.Provider` 边界；当前已实现配置化 HTTP/JSON Provider、环境变量凭据、定时拉取、可选 mTLS、对账和 webhook 告警。真实 AODB/航司的具体接口合同、生产凭据和正式定时配置仍待外部资料。
 
 当前内部入口：
 

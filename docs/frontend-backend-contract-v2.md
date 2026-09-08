@@ -13,7 +13,7 @@ X-Flight-Source-Key: <configured source key>
 
 Core commits the normalized Schedule/Event records to `flight_source_inbox` in one short transaction. The idempotency key is `(provider, record_type, external_record_id)`. The API returns accepted, updated, and duplicate counts without waiting for task generation. The Worker claims records with a lease, applies them to Core flight facts, retries transient failures with backoff, and records terminal failures for diagnostics. `GET /api/v1/flights` is the fast read model used by Admin Web.
 
-The normalized provider port is ready, but the real AODB/airline adapter, credentials, scheduled polling, and production callback configuration are intentionally not enabled until the external contract is supplied. Development seed flights remain available for local acceptance.
+The normalized provider port and a configurable HTTP/JSON adapter are implemented. It supports contract-specific envelope, field, status and time mappings, environment-only credentials, optional mTLS, scheduled polling, reconciliation and webhook alerts. The vendor-specific contract, production credentials and production callback configuration remain pending; development seed flights remain only local acceptance fixtures.
 
 ## Position and capability dictionaries
 

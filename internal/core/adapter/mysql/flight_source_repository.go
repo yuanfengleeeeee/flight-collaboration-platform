@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 )
 
 var _ flightsync.Repository = (*FlightSourceRepository)(nil)
+var _ flightsync.ReconciliationRepository = (*FlightSourceRepository)(nil)
+var _ flightsync.ReconciliationHealthRepository = (*FlightSourceRepository)(nil)
 
 type FlightSourceRepository struct{ db *gorm.DB }
 
@@ -384,6 +387,120 @@ func (r *FlightSourceRepository) ApplyEvent(ctx context.Context, record flightsy
 	})
 }
 
+func (r *FlightSourceRepository) ReconcileSchedules(ctx context.Context, provider string, from, to time.Time, schedules []flightintegration.Schedule, checkedAt time.Time) (flightsync.ReconciliationResult, error) {
+	if r == nil || r.db == nil {
+		return flightsync.ReconciliationResult{}, flightsync.ErrRepositoryNotConfigured
+	}
+	from = from.UTC()
+	to = to.UTC()
+	checkedAt = checkedAt.UTC()
+	if checkedAt.IsZero() {
+		checkedAt = time.Now().UTC()
+	}
+	upstreamIDs := make(map[string]struct{}, len(schedules))
+	for _, schedule := range schedules {
+		if externalID := strings.TrimSpace(schedule.ExternalFlightID); externalID != "" {
+			upstreamIDs[externalID] = struct{}{}
+		}
+	}
+
+	var coreRows []flightRow
+	if err := r.db.WithContext(ctx).Select("external_flight_id").Where("source_provider = ? AND scheduled_at >= ? AND scheduled_at < ? AND external_flight_id IS NOT NULL AND external_flight_id <> ''", provider, from, to).Find(&coreRows).Error; err != nil {
+		return flightsync.ReconciliationResult{}, fmt.Errorf("list core flights for reconciliation: %w", err)
+	}
+	coreIDs := make(map[string]struct{}, len(coreRows))
+	for _, row := range coreRows {
+		if externalID := strings.TrimSpace(row.ExternalFlightID); externalID != "" {
+			coreIDs[externalID] = struct{}{}
+		}
+	}
+
+	pendingIDs := make(map[string]struct{})
+	if len(upstreamIDs) > 0 {
+		ids := make([]string, 0, len(upstreamIDs))
+		for externalID := range upstreamIDs {
+			ids = append(ids, externalID)
+		}
+		var values []string
+		if err := r.db.WithContext(ctx).Model(&flightSourceInboxRow{}).Where("provider = ? AND record_type = ? AND external_record_id IN ? AND status <> ?", provider, flightsync.RecordTypeSchedule, ids, sharedEvent.StatusApplied).Pluck("external_record_id", &values).Error; err != nil {
+			return flightsync.ReconciliationResult{}, fmt.Errorf("list pending flight source schedules: %w", err)
+		}
+		for _, externalID := range values {
+			pendingIDs[strings.TrimSpace(externalID)] = struct{}{}
+		}
+	}
+
+	upstreamMissing := make([]string, 0)
+	for externalID := range upstreamIDs {
+		if _, exists := coreIDs[externalID]; !exists {
+			if _, pending := pendingIDs[externalID]; !pending {
+				upstreamMissing = append(upstreamMissing, externalID)
+			}
+		}
+	}
+	coreMissing := make([]string, 0)
+	for externalID := range coreIDs {
+		if _, exists := upstreamIDs[externalID]; !exists {
+			coreMissing = append(coreMissing, externalID)
+		}
+	}
+	pending := make([]string, 0, len(pendingIDs))
+	for externalID := range pendingIDs {
+		pending = append(pending, externalID)
+	}
+	sort.Strings(upstreamMissing)
+	sort.Strings(coreMissing)
+	sort.Strings(pending)
+	status := "matched"
+	if len(upstreamMissing) > 0 || len(coreMissing) > 0 {
+		status = "mismatch"
+	} else if len(pending) > 0 {
+		status = "pending"
+	}
+	result := flightsync.ReconciliationResult{Provider: provider, WindowFrom: from, WindowTo: to, UpstreamCount: len(upstreamIDs), CoreCount: len(coreIDs), PendingApplyCount: len(pending), UpstreamMissingCount: len(upstreamMissing), CoreMissingCount: len(coreMissing), UpstreamMissingIDs: upstreamMissing, CoreMissingIDs: coreMissing, PendingApplyIDs: pending, Status: status, CheckedAt: checkedAt}
+	publicID, err := id.NewPublicID()
+	if err != nil {
+		return flightsync.ReconciliationResult{}, fmt.Errorf("generate reconciliation public id: %w", err)
+	}
+	result.PublicID = publicID
+	details, err := json.Marshal(map[string]any{"upstream_missing_ids": upstreamMissing, "core_missing_ids": coreMissing, "pending_apply_ids": pending})
+	if err != nil {
+		return flightsync.ReconciliationResult{}, fmt.Errorf("marshal reconciliation details: %w", err)
+	}
+	row := flightSourceReconciliationRow{PublicID: publicID, Provider: provider, WindowFrom: from, WindowTo: to, UpstreamCount: len(upstreamIDs), CoreCount: len(coreIDs), PendingApplyCount: len(pending), UpstreamMissingCount: len(upstreamMissing), CoreMissingCount: len(coreMissing), Status: status, Details: details, CheckedAt: checkedAt, CreatedAt: checkedAt}
+	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return flightsync.ReconciliationResult{}, fmt.Errorf("persist flight source reconciliation: %w", err)
+	}
+	return result, nil
+}
+
+func (r *FlightSourceRepository) LatestReconciliation(ctx context.Context, provider string) (flightsync.ReconciliationResult, error) {
+	if r == nil || r.db == nil {
+		return flightsync.ReconciliationResult{}, flightsync.ErrRepositoryNotConfigured
+	}
+	var row flightSourceReconciliationRow
+	if err := r.db.WithContext(ctx).Where("provider = ?", provider).Order("checked_at DESC, id DESC").First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return flightsync.ReconciliationResult{}, nil
+		}
+		return flightsync.ReconciliationResult{}, err
+	}
+	result := row.toReconciliationResult()
+	if len(row.Details) > 0 {
+		var details struct {
+			UpstreamMissingIDs []string `json:"upstream_missing_ids"`
+			CoreMissingIDs     []string `json:"core_missing_ids"`
+			PendingApplyIDs    []string `json:"pending_apply_ids"`
+		}
+		if err := json.Unmarshal(row.Details, &details); err == nil {
+			result.UpstreamMissingIDs = details.UpstreamMissingIDs
+			result.CoreMissingIDs = details.CoreMissingIDs
+			result.PendingApplyIDs = details.PendingApplyIDs
+		}
+	}
+	return result, nil
+}
+
 func sourceEventID(provider, externalID string) string {
 	return strings.ToLower(strings.TrimSpace(provider)) + ":" + strings.TrimSpace(externalID)
 }
@@ -427,10 +544,33 @@ type flightSourceHealthRow struct {
 	LastError     string     `gorm:"column:last_error"`
 }
 
+type flightSourceReconciliationRow struct {
+	ID                   uint64    `gorm:"column:id;primaryKey"`
+	PublicID             string    `gorm:"column:public_id"`
+	Provider             string    `gorm:"column:provider"`
+	WindowFrom           time.Time `gorm:"column:window_from"`
+	WindowTo             time.Time `gorm:"column:window_to"`
+	UpstreamCount        int       `gorm:"column:upstream_count"`
+	CoreCount            int       `gorm:"column:core_count"`
+	PendingApplyCount    int       `gorm:"column:pending_apply_count"`
+	UpstreamMissingCount int       `gorm:"column:upstream_missing_count"`
+	CoreMissingCount     int       `gorm:"column:core_missing_count"`
+	Status               string    `gorm:"column:status"`
+	Details              []byte    `gorm:"column:details"`
+	CheckedAt            time.Time `gorm:"column:checked_at"`
+	CreatedAt            time.Time `gorm:"column:created_at"`
+}
+
 func (flightSourceHealthRow) TableName() string { return "flight_source_health" }
 
 func (row flightSourceHealthRow) toDomain() flightsync.SourceHealth {
 	return flightsync.SourceHealth{Provider: row.Provider, State: flightsync.SourceState(row.State), LastAttemptAt: row.LastAttemptAt, LastSuccessAt: row.LastSuccessAt, LastFailureAt: row.LastFailureAt, LastError: row.LastError, FallbackEnabled: true}
+}
+
+func (flightSourceReconciliationRow) TableName() string { return "flight_source_reconciliation" }
+
+func (row flightSourceReconciliationRow) toReconciliationResult() flightsync.ReconciliationResult {
+	return flightsync.ReconciliationResult{PublicID: row.PublicID, Provider: row.Provider, WindowFrom: row.WindowFrom, WindowTo: row.WindowTo, UpstreamCount: row.UpstreamCount, CoreCount: row.CoreCount, PendingApplyCount: row.PendingApplyCount, UpstreamMissingCount: row.UpstreamMissingCount, CoreMissingCount: row.CoreMissingCount, Status: row.Status, CheckedAt: row.CheckedAt}
 }
 
 func (flightSourceInboxRow) TableName() string { return "flight_source_inbox" }

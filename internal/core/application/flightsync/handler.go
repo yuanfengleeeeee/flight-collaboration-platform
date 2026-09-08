@@ -18,6 +18,7 @@ func RegisterRoutes(router gin.IRouter, service *Service, middleware ...gin.Hand
 	chain := append(append([]gin.HandlerFunc{}, middleware...), handler.Ingest)
 	router.POST("/internal/integration/v1/flight-source/sync", chain...)
 	router.GET("/internal/integration/v1/flight-source/health", append(append([]gin.HandlerFunc{}, middleware...), handler.Health)...)
+	router.GET("/internal/integration/v1/flight-source/reconciliation", append(append([]gin.HandlerFunc{}, middleware...), handler.Reconciliation)...)
 }
 
 func (h Handler) Health(c *gin.Context) {
@@ -28,6 +29,27 @@ func (h Handler) Health(c *gin.Context) {
 			return
 		}
 		writeError(c, http.StatusServiceUnavailable, "flight_source_health_unavailable", "flight source health is unavailable")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": value, "request_id": observability.RequestID(c), "trace_id": observability.TraceID(c)})
+}
+
+func (h Handler) Reconciliation(c *gin.Context) {
+	value, err := h.service.LatestReconciliation(c.Request.Context(), c.Query("provider"))
+	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			writeError(c, http.StatusBadRequest, "invalid_flight_source_provider", "provider is invalid")
+			return
+		}
+		if errors.Is(err, ErrRepositoryNotConfigured) {
+			writeError(c, http.StatusServiceUnavailable, "flight_source_reconciliation_unavailable", "flight source reconciliation is unavailable")
+			return
+		}
+		writeError(c, http.StatusInternalServerError, "flight_source_reconciliation_failed", "flight source reconciliation could not be read")
+		return
+	}
+	if value.CheckedAt.IsZero() {
+		writeError(c, http.StatusNotFound, "flight_source_reconciliation_not_found", "no flight source reconciliation has been recorded")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": value, "request_id": observability.RequestID(c), "trace_id": observability.TraceID(c)})

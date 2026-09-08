@@ -1,9 +1,9 @@
-import { projectionStatus, taskStatusLabel } from "@flight/task-domain";
+import { projectionStatus, taskReceiptLabel, taskStatusLabel } from "@flight/task-domain";
 import { edgeGateway, miniappRealtime } from "../../src/app/session";
 import type { EdgeTaskProjection } from "@flight/contracts";
 
 Page({
-  data: { tasks: [] as (EdgeTaskProjection & { status_label: string })[], loading: true, error: "", realtimeState: "idle" },
+  data: { tasks: [] as (EdgeTaskProjection & { status_label: string; receipt_label: string })[], loading: true, error: "", realtimeState: "idle", projectionLagState: "unknown", projectionLagSeconds: 0, projectionRevision: 0 },
 
   onShow() {
     this.loadTasks();
@@ -16,8 +16,8 @@ Page({
     this.setData({ loading: true, error: "" });
     try {
       const response = await edgeGateway.listTasks();
-      const tasks = response.items.map((task) => ({ ...task, status_label: taskStatusLabel[projectionStatus(task)] }));
-      this.setData({ tasks, loading: false });
+      const tasks = response.items.map((task) => ({ ...task, status_label: taskStatusLabel[projectionStatus(task)], receipt_label: taskReceiptLabel(projectionStatus(task), task.receipt_status || "pending") }));
+      this.setData({ tasks, projectionLagState: response.projection_lag_state, projectionLagSeconds: response.projection_lag_seconds, projectionRevision: response.projection_revision, loading: false });
     } catch (error) {
       this.setData({ loading: false, error: error instanceof Error ? error.message : "任务同步失败" });
     }

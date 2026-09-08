@@ -960,6 +960,28 @@ paths:
         '400': {description: Invalid provider}
         '401': {description: Invalid flight source key}
         '503': {description: Flight source health is temporarily unavailable}
+  /internal/integration/v1/flight-source/reconciliation:
+    get:
+      summary: Read the latest flight source reconciliation report
+      description: Compares the latest upstream schedule window with Core flight facts. Records still waiting in the durable source inbox are reported as pending instead of a mismatch.
+      operationId: getFlightSourceReconciliation
+      x-internal: true
+      security: [{flightSourceKey: []}]
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          schema: {type: string, minLength: 2, maxLength: 64}
+      responses:
+        '200':
+          description: Latest reconciliation report
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FlightSourceReconciliationResponse'}
+        '400': {description: Invalid provider}
+        '401': {description: Invalid flight source key}
+        '404': {description: No reconciliation report has been recorded}
+        '503': {description: Flight source reconciliation is temporarily unavailable}
   /api/v1/positions:
     get:
       summary: List job position dictionary entries
@@ -2223,10 +2245,38 @@ components:
         last_failure_at: {type: string, format: date-time}
         last_error: {type: string}
         fallback_enabled: {type: boolean}
+        last_reconciliation_at: {type: string, format: date-time}
+        last_reconciliation_status: {type: string, enum: [matched, pending, mismatch]}
+        last_reconciliation_mismatch_count: {type: integer, minimum: 0}
     FlightSourceHealthResponse:
       type: object
       required: [data, request_id, trace_id]
       properties:
         data: {$ref: '#/components/schemas/FlightSourceHealth'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    FlightSourceReconciliation:
+      type: object
+      required: [public_id, provider, window_from, window_to, upstream_count, core_count, pending_apply_count, upstream_missing_count, core_missing_count, status, checked_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        provider: {type: string}
+        window_from: {type: string, format: date-time}
+        window_to: {type: string, format: date-time}
+        upstream_count: {type: integer, minimum: 0}
+        core_count: {type: integer, minimum: 0}
+        pending_apply_count: {type: integer, minimum: 0}
+        upstream_missing_count: {type: integer, minimum: 0}
+        core_missing_count: {type: integer, minimum: 0}
+        upstream_missing_ids: {type: array, items: {type: string}}
+        core_missing_ids: {type: array, items: {type: string}}
+        pending_apply_ids: {type: array, items: {type: string}}
+        status: {type: string, enum: [matched, pending, mismatch]}
+        checked_at: {type: string, format: date-time}
+    FlightSourceReconciliationResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/FlightSourceReconciliation'}
         request_id: {type: string}
         trace_id: {type: string}

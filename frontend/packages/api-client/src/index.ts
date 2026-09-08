@@ -27,6 +27,7 @@ import type {
   CoreAuditList,
   CoreScopeView,
   CoreDiagnostics,
+  CoreManagementRealtimeEvent,
   CorePersonnel,
   CorePersonnelList,
   CoreTemplate,
@@ -343,6 +344,162 @@ export class CoreApiClient {
 
   cancelTask(publicID: string, payload: { cancellation_id: string; expected_task_version: number; reason: string }): Promise<ApiEnvelope<TaskCancellationResult>> {
     return this.http.request<ApiEnvelope<TaskCancellationResult>>(`/api/v1/tasks/${encodeURIComponent(publicID)}/cancel`, { method: "POST", body: JSON.stringify(payload) });
+  }
+}
+
+export type ManagementRealtimeState = "idle" | "connecting" | "open" | "retrying" | "closed" | "unauthorized" | "forbidden";
+
+export interface ManagementRealtimeClientOptions {
+  baseUrl: string;
+  getAccessToken?: () => string | undefined;
+  extraHeaders?: () => Record<string, string>;
+  onEvent: (event: CoreManagementRealtimeEvent) => void;
+  onStateChange?: (state: ManagementRealtimeState) => void;
+  onUnauthorized?: () => void;
+  reconnectBaseMs?: number;
+  reconnectMaxMs?: number;
+}
+
+export class ManagementRealtimeClient {
+  private readonly baseUrl: string;
+  private readonly getAccessToken?: ManagementRealtimeClientOptions["getAccessToken"];
+  private readonly extraHeaders?: ManagementRealtimeClientOptions["extraHeaders"];
+  private readonly onEvent: ManagementRealtimeClientOptions["onEvent"];
+  private readonly onStateChange?: ManagementRealtimeClientOptions["onStateChange"];
+  private readonly onUnauthorized?: ManagementRealtimeClientOptions["onUnauthorized"];
+  private readonly reconnectBaseMs: number;
+  private readonly reconnectMaxMs: number;
+  private abortController?: AbortController;
+  private reconnectTimer?: ReturnType<typeof globalThis.setTimeout>;
+  private running = false;
+  private reconnectAttempt = 0;
+  private lastEventID = 0;
+  private state: ManagementRealtimeState = "idle";
+
+  constructor(options: ManagementRealtimeClientOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.getAccessToken = options.getAccessToken;
+    this.extraHeaders = options.extraHeaders;
+    this.onEvent = options.onEvent;
+    this.onStateChange = options.onStateChange;
+    this.onUnauthorized = options.onUnauthorized;
+    this.reconnectBaseMs = Math.max(500, options.reconnectBaseMs ?? 1_000);
+    this.reconnectMaxMs = Math.max(this.reconnectBaseMs, options.reconnectMaxMs ?? 30_000);
+  }
+
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    this.reconnectAttempt = 0;
+    void this.connect();
+  }
+
+  stop(): void {
+    this.running = false;
+    if (this.reconnectTimer !== undefined) globalThis.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    this.abortController?.abort();
+    this.abortController = undefined;
+    this.setState("closed");
+  }
+
+  getState(): ManagementRealtimeState { return this.state; }
+  getLastEventID(): number { return this.lastEventID; }
+
+  private async connect(): Promise<void> {
+    if (!this.running) return;
+    this.setState("connecting");
+    const controller = new AbortController();
+    this.abortController = controller;
+    const params = new URLSearchParams({ wait_seconds: "55" });
+    if (this.lastEventID > 0) params.set("after_id", String(this.lastEventID));
+    const headers = new Headers({ Accept: "text/event-stream" });
+    const token = this.getAccessToken?.();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    for (const [key, value] of Object.entries(this.extraHeaders?.() ?? {})) headers.set(key, value);
+    try {
+      const response = await fetch(`${this.baseUrl}/api/v1/realtime/management?${params.toString()}`, { headers, signal: controller.signal });
+      if (!response.ok) {
+        if (response.status === 401) {
+          this.setState("unauthorized");
+          this.onUnauthorized?.();
+          this.running = false;
+          return;
+        }
+        if (response.status === 403) {
+          this.setState("forbidden");
+          this.running = false;
+          return;
+        }
+        throw new Error(`management realtime returned ${response.status}`);
+      }
+      if (!response.body) throw new Error("management realtime response has no body");
+      this.reconnectAttempt = 0;
+      this.setState("open");
+      await this.readStream(response.body.getReader(), controller.signal);
+      if (this.running && !controller.signal.aborted) this.scheduleReconnect();
+    } catch {
+      if (this.running && !controller.signal.aborted) this.scheduleReconnect();
+    } finally {
+      if (this.abortController === controller) this.abortController = undefined;
+    }
+  }
+
+  private async readStream(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal): Promise<void> {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (!signal.aborted) {
+      const result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+      let separator = buffer.indexOf("\n\n");
+      while (separator >= 0) {
+        this.handleSseFrame(buffer.slice(0, separator));
+        buffer = buffer.slice(separator + 2);
+        separator = buffer.indexOf("\n\n");
+      }
+    }
+  }
+
+  private handleSseFrame(frame: string): void {
+    let id: number | undefined;
+    let eventName = "message";
+    const data: string[] = [];
+    for (const line of frame.split(/\r?\n/)) {
+      if (line.startsWith(":")) continue;
+      const separator = line.indexOf(":");
+      const field = separator >= 0 ? line.slice(0, separator) : line;
+      const value = separator >= 0 ? line.slice(separator + 1).trimStart() : "";
+      if (field === "id") {
+        const parsed = Number(value);
+        if (Number.isSafeInteger(parsed) && parsed >= 0) id = parsed;
+      } else if (field === "event") eventName = value;
+      else if (field === "data") data.push(value);
+    }
+    if (id !== undefined && id > this.lastEventID) this.lastEventID = id;
+    if (!data.length || eventName === "ready" || eventName === "error") return;
+    try {
+      const event = JSON.parse(data.join("\n")) as CoreManagementRealtimeEvent;
+      if (typeof event.id === "number" && typeof event.event_type === "string") this.onEvent(event);
+    } catch {
+      // A malformed hint is ignored; the next reconnect and paged reads remain authoritative.
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.running || this.reconnectTimer !== undefined) return;
+    this.reconnectAttempt += 1;
+    const delay = Math.min(this.reconnectMaxMs, this.reconnectBaseMs * (2 ** Math.min(this.reconnectAttempt - 1, 8)));
+    this.setState("retrying");
+    this.reconnectTimer = globalThis.setTimeout(() => {
+      this.reconnectTimer = undefined;
+      void this.connect();
+    }, delay);
+  }
+
+  private setState(state: ManagementRealtimeState): void {
+    this.state = state;
+    this.onStateChange?.(state);
   }
 }
 

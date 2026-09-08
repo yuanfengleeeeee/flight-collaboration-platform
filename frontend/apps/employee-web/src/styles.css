@@ -56,6 +56,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .employee-counts button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 9px 12px; color: #7b9392; background: none; border: 1px solid transparent; border-radius: 7px; font-size: 11px; }
 .employee-counts button strong { color: #4c7776; font-family: "IBM Plex Mono", Consolas, monospace; }
 .employee-counts button.is-active { color: #1a5961; background: #e4f1ee; border-color: #c8e1db; }
+.projection-health { margin-bottom: 14px; padding: 8px 12px; color: #4c7776; background: #f1f7f5; border: 1px solid #d6e8e2; border-radius: 7px; font-size: 12px; }
+.projection-health.projection-unknown { color: #8b6a2b; background: #fff8e8; border-color: #f0dfb3; }
 .employee-task-list { display: grid; gap: 11px; }
 .employee-notification-list { display: grid; gap: 11px; }
 .employee-notification { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px; background: var(--ops-surface); border: 1px solid var(--ops-line-200); border-radius: 11px; }

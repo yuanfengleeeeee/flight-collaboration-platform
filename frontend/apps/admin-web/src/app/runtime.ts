@@ -1,4 +1,6 @@
-import { ApiClient, CoreApiClient } from "@flight/api-client";
+import { ApiClient, CoreApiClient, ManagementRealtimeClient } from "@flight/api-client";
+import type { ManagementRealtimeState } from "@flight/api-client";
+import type { CoreManagementRealtimeEvent } from "@flight/contracts";
 
 const env = import.meta.env;
 const accessTokenKey = "flight.core.admin.access-token";
@@ -114,6 +116,17 @@ export const coreApi = new CoreApiClient(new ApiClient({
   getAccessToken: readAdminAccessToken,
   extraHeaders: devActorHeaders,
 }));
+
+export function createAdminRealtimeClient(onEvent: (event: CoreManagementRealtimeEvent) => void, onStateChange?: (state: ManagementRealtimeState) => void): ManagementRealtimeClient {
+  return new ManagementRealtimeClient({
+    baseUrl: adminRuntime.coreBaseUrl,
+    getAccessToken: readAdminAccessToken,
+    extraHeaders: devActorHeaders,
+    onEvent,
+    onStateChange,
+    onUnauthorized: clearAdminAccessToken,
+  });
+}
 
 export function hasAdminAccess(): boolean {
   return Boolean(readAdminAccessToken() || adminRuntime.devActorEnabled);
