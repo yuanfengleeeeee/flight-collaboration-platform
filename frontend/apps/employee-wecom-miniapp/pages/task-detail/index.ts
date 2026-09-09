@@ -1,6 +1,6 @@
 import { canComplete, canReceive, canStart, commandStatusLabel, createClientID, projectionStatus, taskStatusLabel } from "@flight/task-domain";
 import type { CommandStatus, EdgeTaskList, EdgeTaskProjection } from "@flight/contracts";
-import { edgeGateway, miniappRealtime, taskCommandStore } from "../../src/app/session";
+import { edgeGateway, isMiniappUnauthorized, miniappRealtime, relaunchMiniappLogin, restoreMiniappSession, taskCommandStore } from "../../src/app/session";
 import { MiniappHttpError } from "../../src/platform/edge-gateway";
 import type { MiniappTaskCommandAction, MiniappTaskCommandReceipt } from "../../src/platform/edge-gateway";
 
@@ -12,15 +12,22 @@ Page({
 
   onLoad(query: { id?: string }) {
     this.setData({ taskID: query.id || "" });
-    this.loadTask(query.id || "");
   },
 
   onShow() {
-    miniappRealtime.start(() => this.loadTask(this.data.taskID), (state) => this.setData({ realtimeState: state }), () => wx.reLaunch({ url: "/pages/login/index" }));
-    if (this.data.taskID) this.resumeStoredCommand(this.data.taskID);
+    void this.prepare();
   },
 
   onHide() { miniappRealtime.stop(); stopCommandPolling(); },
+
+  async prepare() {
+    if (!(await restoreMiniappSession())) {
+      relaunchMiniappLogin();
+      return;
+    }
+    miniappRealtime.start(() => { void this.loadTask(this.data.taskID); }, (state) => this.setData({ realtimeState: state }), () => { void this.prepare(); });
+    if (this.data.taskID) this.resumeStoredCommand(this.data.taskID);
+  },
 
   async loadTask(taskID: string, confirmedCommand?: MiniappTaskCommandReceipt) {
     if (!taskID) return;
@@ -35,6 +42,10 @@ Page({
       this.setData({ task, statusLabel: taskStatusLabel[status], canReceive: canReceive(status, receiptStatus), canStart: canStart(status, receiptStatus), canComplete: canComplete(status), projectionLagState: response.projection_lag_state, projectionLagSeconds: response.projection_lag_seconds, projectionRevision: response.projection_revision, loading: false });
       this.resumeStoredCommand(taskID);
     } catch (error) {
+      if (isMiniappUnauthorized(error)) {
+        relaunchMiniappLogin();
+        return;
+      }
       this.setData({ loading: false, error: miniappErrorMessage(error, "任务详情读取失败") });
     }
   },

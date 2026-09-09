@@ -2,6 +2,7 @@
   <view class="eyebrow">WECOM / TASKS</view>
   <view class="title">我的任务</view>
   <view class="realtime-state">实时：{{realtimeState}}</view>
+  <button class="button secondary refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="reload">刷新任务</button>
   <view class="projection-health">快照：{{projectionLagState === 'known' ? ('延迟 ' + projectionLagSeconds + ' 秒') : '同步延迟未知'}} · 版本 {{projectionRevision}}</view>
   <view class="muted">任务来自项目员工账号对应的 Edge Projection，企业微信只负责入口和身份绑定。</view>
   <view wx:if="{{error}}" class="error">{{error}}</view>

@@ -1,7 +1,7 @@
 # 基础设施任务交接
 
-> 更新时间：2026-09-08
-> 状态：Architecture Foundation 已冻结；`flight-dev` 资源已完成收口，生产化和正式故障门禁仍待完成。
+> 更新时间：2026-09-09
+> 状态：Architecture Foundation 已冻结；`flight-dev` 单容器开发环境已运行，生产化和正式故障门禁仍待完成。
 
 ## 当前拓扑
 
@@ -29,7 +29,7 @@
 
 ## 2026-09-08 flight-dev 资源收口
 
-- `flight-dev` 当前保留 4 个容器：`app`、Core MySQL、Edge MySQL、Edge Redis；容器当前均为停止状态，数据 Volume 未删除。
+- `flight-dev` 当前保留 4 个容器：`app`、Core MySQL、Edge MySQL、Edge Redis；本次交接复核时均已运行，数据库和 Redis 为 healthy，数据 Volume 未删除。
 - 当前仅保留 3 个 Volume：`flight-dev_core_mysql_data`、`flight-dev_edge_mysql_data`、`flight-dev_edge_redis_data`。此前其他项目的 26 个 Volume 已按明确授权删除，旧测试/验收数据库数据不可恢复。
 - `docker system df` 复核：3 个镜像约 `1.456GB`、3 个 Volume 约 `430.3MB`、BuildKit 缓存 `0B`；容器可写层约 `122.9kB`。
 - 重新启动固定开发环境使用 `scripts/dev-up.ps1`；危险/版本测试仍使用 `scripts/dangerous-test-up.ps1` 创建隔离项目和新 Volume。
@@ -64,3 +64,9 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all
 - Docker 前置检查通过；`scripts/dev-up.ps1` 的 `flight-dev-app` 构建因 Docker Hub 拉取 `node:22-bookworm-slim`、`nginx:1.27-alpine`、`golang:1.25` 返回 EOF 失败。
 - 已启动固定项目的 Core MySQL、Edge MySQL、Edge Redis，三者均 healthy，并创建 `flight-dev_core_mysql_data`、`flight-dev_edge_mysql_data`、`flight-dev_edge_redis_data` named Volume。
 - `app` 尚未启动，未执行 migration/seed；未清理其他项目或 Volume。
+
+## 2026-09-09 flight-dev 与真机预览复核
+
+- `scripts/ensure-docker.ps1` 和 `scripts/verify.ps1 -Mode all` 均通过；Compose 实际状态为 `flight-dev-app-1`、Core MySQL、Edge MySQL、Edge Redis 全部运行。
+- 应用端口为 Admin Web `44174`、Employee Web `44175`、Core API `48081`、Edge API `48082`、Worker metrics `49090`；Edge `/health/ready` 通过宿主机局域网 IP `10.187.207.53` 自检。
+- 前端已生成指向 `http://10.187.207.53:48082` 的两套小程序预览包。真机扫码、手机到电脑的网络连通性和 Windows 防火墙入站规则仍待人工验收；生产环境仍需 HTTPS 和合法域名配置。

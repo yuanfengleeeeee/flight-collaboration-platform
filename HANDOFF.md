@@ -1,8 +1,8 @@
 # 项目交接总览
 
-> 更新时间：2026-09-08
+> 更新时间：2026-09-09
 > 当前分支：`agent/foundation-and-handoff`
-> 当前工作区：本次交接收录后端 Provider/验收入口、Docker 前置与固定 `flight-dev` 容器化、前端同步竞态修复等项目变更；同步完成后应保持干净。
+> 当前工作区：本次交接收录管理端/员工端视觉收口、两套小程序会话与实时同步修复、局域网真机预览构建和交接状态更新；验证完成后同步到 `origin`，真机扫码验收仍待用户执行。
 
 ## 当前唯一业务口径
 
@@ -73,4 +73,5 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all
 
 本轮在独立迁移专用 Compose 项目应用并复核了 Core `000010–000014`、Edge `000007`；完整 API/Gateway/Worker 隔离验收因标准镜像拉取 `EOF` 尚未完成。真实 AODB/航司合同资料仍未提供，Provider 只保留适配位置。
 
-`flight-dev` 资源已完成收口：当前仅保留 `flight-dev-app`、MySQL、Redis 三个镜像及 4 个 `flight-dev` 容器；仅保留 `flight-dev_core_mysql_data`、`flight-dev_edge_mysql_data`、`flight-dev_edge_redis_data` 三个 named Volume。26 个非 `flight-dev` Volume 已按明确授权删除，BuildKit 缓存为 `0B`。4 个容器当前处于停止状态，重新运行需执行 `scripts/dev-up.ps1`；数据 Volume 仍保留。
+`flight-dev` 资源已完成收口：当前仅保留 `flight-dev-app`、MySQL、Redis 三个镜像及 4 个 `flight-dev` 容器；仅保留 `flight-dev_core_mysql_data`、`flight-dev_edge_mysql_data`、`flight-dev_edge_redis_data` 三个 named Volume。26 个非 `flight-dev` Volume 已按明确授权删除，BuildKit 缓存为 `0B`。本次交接复核时 4 个容器均为运行状态：应用端口为 `44174/44175/48081/48082`，数据库和 Redis 为 healthy；数据 Volume 仍保留。
+- 局域网真机预览使用宿主机 IPv4 `10.187.207.53`，Edge 地址为 `http://10.187.207.53:48082`；电脑自检 `/health/ready` 已返回 200，手机扫码和 Windows 防火墙放行尚未实际验收。

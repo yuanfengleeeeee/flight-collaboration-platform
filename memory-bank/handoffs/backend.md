@@ -1,6 +1,6 @@
 # 后端任务交接快照
 
-> 更新时间：2026-09-08
+> 更新时间：2026-09-09
 > 状态：当前代码/契约已覆盖主要业务流程；生产配置与专项验收待完成
 
 详细业务流程见 [`docs/business-process-v2.md`](../../docs/business-process-v2.md)，前后端边界见 [`docs/frontend-backend-handoff.md`](../../docs/frontend-backend-handoff.md)。本快照只记录当前接手所需事实，不保留旧阶段草案。
@@ -88,5 +88,11 @@
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/ensure-docker.ps1
 ```
+
+## 2026-09-09 开发运行态复核
+
+- Docker 前置通过；统一 `scripts/verify.ps1 -Mode all` 退出码为 `0`，Go 测试、构建入口和差异检查均通过。
+- 固定 `flight-dev` 当前为单个 `app` 容器承载 Core API、Edge API、Worker、Gateway/Web，并连接独立 Core MySQL、Edge MySQL 和 Edge Redis；运行态不是生产隔离验收结论。
+- Edge 局域网地址为 `http://10.187.207.53:48082`，宿主机 `/health/ready` 返回 200；真实微信平台凭据、HTTPS 域名、Provider 合同和生产故障门禁仍未完成。
 
 推荐入口：`powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Mode all`。文档修订阶段不应用 migration、不清理数据库、不停止已有服务；迁移专项和 Docker 资源清理使用独立项目及精确资源名单执行。

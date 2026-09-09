@@ -1,7 +1,7 @@
 # 前端任务交接快照
 
-> 更新时间：2026-09-08
-> 状态：四端当前页面与 API 接入已落地；真实平台发布和专项验收待完成
+> 更新时间：2026-09-09
+> 状态：四端当前页面与 API 接入已落地；小程序会话/实时恢复和局域网预览构建已补齐，真实设备发布和专项验收待完成
 
 业务流程唯一说明：[`docs/business-process-v2.md`](../../docs/business-process-v2.md)。前后端接口边界：[`docs/frontend-backend-handoff.md`](../../docs/frontend-backend-handoff.md)。
 
@@ -56,13 +56,20 @@ Command 进入 `confirmed` 后，员工端会等待 Edge Projection 的同步版
 ## 当前未完成
 
 - 真实个人微信/企业微信凭据、HTTPS 域名、管理 SSO 正式配置和平台告警/订阅消息。
-- 正式员工/管理员主数据预置、两套小程序开发者工具编译预览和发布验收。
+- 正式员工/管理员主数据预置、两套小程序真实设备扫码预览和发布验收；局域网构建产物已生成，但尚未在用户手机上完成扫码验证。
 - 503、服务重启、网络分区、多副本 fan-out、容量和 p50/p95/p99 性能门禁。
 - 最终品牌视觉、无障碍和真实设备体验评审。
+
+## 2026-09-09 小程序登录、数据页和局域网预览收口
+
+- 两套员工小程序的任务、任务详情、通知、历史、异常页面现在都先恢复持久化 Edge Session，再请求数据和启动实时连接，避免登录后立即被 401 重新拉回登录页。
+- 对任务/通知/历史请求增加并发去重、HTTP/Socket 超时、401 统一回登录和手动刷新入口；通知、历史导航入口已补齐，实时 Socket 仍只负责提示，数据以 HTTP 快照恢复。
+- 已用 `MINIAPP_EDGE_API_BASE_URL=http://10.187.207.53:48082 pnpm.cmd build:miniapps` 生成个人微信和企业微信局域网预览包，分别位于 `frontend/dist/employee-miniapp` 和 `frontend/dist/employee-wecom-miniapp`。
 
 ## 已执行验证
 
 - 前端 `typecheck`、`lint`、`test`（14/14）和 Web `build` 已通过；小程序打包检查已通过。
 - 最新前端复核中，`typecheck`、`test`（5 个文件/16 个测试）和 `build:miniapps` 已通过；Web `build`、`lint` 结果保持通过。
+- 2026-09-09 再次实际通过 `pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（5 个文件/16 个测试）、`pnpm.cmd build`、`scripts/verify.ps1 -Mode all` 和 `git diff --check`；Docker 前置通过。未把手机扫码、正式 HTTPS 或生产凭据写成已完成。
 - `admin-pagination.spec.ts` 管理集合分页 Contract 和 `admin-role-matrix.spec.ts` 角色矩阵浏览器验收各通过 1/1。
 - 最新验证前均已执行 Docker preflight；本快照不把 Mock Provider、开发种子或单机 Socket 验收写成生产完成。

@@ -1,22 +1,42 @@
-import { edgeGateway, miniappRealtime } from "../../src/app/session";
+import { edgeGateway, isMiniappUnauthorized, miniappRealtime, relaunchMiniappLogin, restoreMiniappSession } from "../../src/app/session";
 import type { EdgeNotification } from "@flight/contracts";
+
+let notificationLoadPromise: Promise<void> | undefined;
 
 Page({
   data: { items: [] as EdgeNotification[], loading: true, error: "", reading: "", page: 1, pageSize: 20, total: 0, realtimeState: "idle" },
 
   onShow() {
-    this.loadNotifications(this.data.page);
-    miniappRealtime.start(() => this.loadNotifications(this.data.page), (state) => this.setData({ realtimeState: state }), () => wx.reLaunch({ url: "/pages/login/index" }));
+    void this.prepare();
   },
 
   onHide() { miniappRealtime.stop(); },
 
+  async prepare() {
+    if (!(await restoreMiniappSession())) {
+      relaunchMiniappLogin();
+      return;
+    }
+    void this.loadNotifications(this.data.page);
+    miniappRealtime.start(() => { void this.loadNotifications(this.data.page); }, (state) => this.setData({ realtimeState: state }), () => { void this.prepare(); });
+  },
+
   async loadNotifications(page = 1) {
+    if (notificationLoadPromise) return notificationLoadPromise;
+    notificationLoadPromise = this.refreshNotifications(page).finally(() => { notificationLoadPromise = undefined; });
+    return notificationLoadPromise;
+  },
+
+  async refreshNotifications(page = 1) {
     this.setData({ loading: true, error: "" });
     try {
       const response = await edgeGateway.listNotifications(undefined, page, this.data.pageSize);
       this.setData({ items: response.data.items, page: response.data.page, total: response.data.total, loading: false });
     } catch (error) {
+      if (isMiniappUnauthorized(error)) {
+        relaunchMiniappLogin();
+        return;
+      }
       this.setData({ loading: false, error: error instanceof Error ? error.message : "通知读取失败" });
     }
   },
@@ -37,4 +57,6 @@ Page({
   previousPage() { if (this.data.page > 1) this.loadNotifications(this.data.page - 1); },
 
   nextPage() { if (this.data.page * this.data.pageSize < this.data.total) this.loadNotifications(this.data.page + 1); },
+
+  reload() { void this.loadNotifications(this.data.page); },
 });

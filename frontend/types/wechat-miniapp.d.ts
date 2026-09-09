@@ -17,12 +17,14 @@ declare global {
       method?: "GET" | "POST";
       data?: unknown;
       header?: Record<string, string>;
+      timeout?: number;
       success: (response: { statusCode: number; data: unknown }) => void;
       fail: (error: unknown) => void;
     }): void;
     connectSocket(options: {
       url: string;
       protocols?: string[];
+      timeout?: number;
       header?: Record<string, string>;
       success?: () => void;
       fail?: (error: unknown) => void;

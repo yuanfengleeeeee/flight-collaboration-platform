@@ -342,9 +342,11 @@ function AdminShell(): JSX.Element {
   const navigate = useNavigate();
   const access = useAdminAccess();
   const realtime = useAdminRealtime();
+  const [collapsed, setCollapsed] = useState(false);
   function logout(): void { clearAdminAccessToken(); navigate("/login"); }
-  return <div className="admin-shell">
+  return <div className={`admin-shell ${collapsed ? "is-collapsed" : ""}`}>
     <aside className="admin-sidebar">
+      <button className="sidebar-toggle" type="button" aria-label={collapsed ? "展开导航" : "折叠导航"} aria-pressed={collapsed} onClick={() => setCollapsed((value) => !value)}><span aria-hidden="true" /></button>
       <Link to="/tasks" className="brand-lockup"><span className="brand-mark">A</span><span><strong>航空客运地面代理协同</strong><small>OPERATIONS / CONTROL</small></span></Link>
       <nav aria-label="管理端工作区" className="admin-nav">{navGroups.map((group) => { const items = group.items.filter(([section]) => access.loading || access.can(moduleReadPermissions[section])); if (items.length === 0) return null; return <div className="nav-group" key={group.label}><span className="nav-label">{group.label}</span>{items.map(([section, label]) => { const active = location.pathname.includes(`/${section}`); return <Link key={section} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined} to={`/${section}`}>{label}</Link>; })}</div>; })}</nav>
       <div className="scope-card"><span>当前授权范围</span><strong>{access.loading ? "正在读取 Core Scope…" : access.scope?.global ? "全部团队 · 全部区域" : access.roles.includes("leader") ? "当前团队 / 区域" : "由 Core Scope 决定"}</strong><small>{access.error ? "权限状态读取失败，操作仍由 Core 校验" : "前端只做入口提示，不替代服务端授权"}</small></div>
@@ -971,6 +973,48 @@ function formatDate(value: string): string { if (!value) return "—"; const dat
 function toRFC3339(value: string): string { if (!value) return ""; const date = new Date(value); return Number.isNaN(date.valueOf()) ? "" : date.toISOString(); }
 
 function OverviewPage(): JSX.Element {
+  const [report, setReport] = useState<CoreReportOverview>();
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string>();
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setMessage(undefined);
+    coreApi.getReportOverview({}, controller.signal).then((response) => setReport(response.data)).catch((error: unknown) => { if (!controller.signal.aborted) setMessage(readClientError(error)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [reloadKey]);
+
+  const taskCounts = report?.task_counts ?? {};
+  const flightCounts = report?.flight_counts ?? {};
+  const personnelCounts = report?.personnel_counts ?? {};
+  const assignmentCounts = report?.assignment_counts ?? {};
+  const taskTotal = sumCounts(taskCounts);
+  const completedTasks = taskCounts.completed ?? 0;
+  const completionRate = taskTotal ? Math.round((completedTasks / taskTotal) * 100) : 0;
+  const activeTasks = (taskCounts.in_progress ?? 0) + (taskCounts.assigned ?? 0) + (taskCounts.pending_dispatch ?? 0);
+  const exceptionTasks = taskCounts.cancelled ?? 0;
+  const pulseRows = [
+    { label: "执行中", value: taskCounts.in_progress ?? 0, color: "blue" },
+    { label: "已派发", value: taskCounts.assigned ?? 0, color: "mint" },
+    { label: "已完成", value: completedTasks, color: "green" },
+    { label: "待派发", value: taskCounts.pending_dispatch ?? 0, color: "apricot" },
+  ];
+  const maxPulse = Math.max(1, ...pulseRows.map((row) => row.value));
+
+  return <div className="module-page data-center-page">
+    <div className="page-heading"><div><p className="eyebrow">DATA CENTER / CORE FACTS</p><h1>运行数据中心</h1><p className="page-description">从航班、任务、分配和人员四条事实线，快速读懂当前运行脉冲。</p></div><button className="secondary-button" onClick={() => setReloadKey((value) => value + 1)}>刷新快照</button></div>
+    {message && <Notice tone="error">{message}</Notice>}
+    <section className="data-hero glass-panel"><div><p className="data-eyebrow">OPERATING PULSE / LIVE SNAPSHOT</p><h2>{loading ? "正在读取运行脉冲" : completionRate >= 80 ? "运行节奏保持稳定" : "运行节奏需要关注"}</h2><p>所有数字来自 Core 当前事实源；页面不在浏览器内制造或缓存业务状态。</p><span className={`data-status ${completionRate >= 80 ? "is-healthy" : "is-attention"}`}><i /> {loading ? "同步中" : `任务完成率 ${completionRate}%`}</span></div><div className="pulse-score" style={{ background: `conic-gradient(#5966d8 ${completionRate}%, #e8e8ef 0)` }}><div><strong>{loading ? "—" : `${completionRate}%`}</strong><span>任务完成率</span></div></div></section>
+    <section className="data-kpis" aria-label="核心运行指标"><article className="data-kpi glass-panel"><span className="data-kpi-icon data-icon-task" aria-hidden="true" /><p>当前可见任务</p><strong>{loading ? "—" : taskTotal}</strong><small>Core 分页事实</small></article><article className="data-kpi glass-panel"><span className="data-kpi-icon data-icon-flight" aria-hidden="true" /><p>运行航班</p><strong>{loading ? "—" : sumCounts(flightCounts)}</strong><small>计划与生命周期</small></article><article className="data-kpi glass-panel"><span className="data-kpi-icon data-icon-personnel" aria-hidden="true" /><p>人员档案</p><strong>{loading ? "—" : sumCounts(personnelCounts)}</strong><small>启用与状态事实</small></article><article className="data-kpi glass-panel"><span className="data-kpi-icon data-icon-assignment" aria-hidden="true" /><p>任务分配</p><strong>{loading ? "—" : sumCounts(assignmentCounts)}</strong><small>收件与执行握手</small></article></section>
+    <section className="data-center-grid"><article className="data-panel glass-panel"><div className="data-panel-head"><div><h2>任务状态分布</h2><p>当前 Scope 内的任务事实，不代表本地缓存。</p></div><span className="data-legend"><i /> Core task_counts</span></div><div className="pulse-rows">{pulseRows.map((row) => <div className="pulse-row" key={row.label}><div><span>{row.label}</span><strong>{loading ? "—" : row.value}</strong></div><div className="pulse-track"><i className={`pulse-fill pulse-fill-${row.color}`} style={{ width: `${loading ? 0 : Math.round((row.value / maxPulse) * 100)}%` }} /></div></div>)}</div><div className="data-panel-foot"><span>待处理任务</span><strong>{loading ? "—" : activeTasks}</strong><span>已取消</span><strong className="is-warning">{loading ? "—" : exceptionTasks}</strong></div></article><article className="data-panel glass-panel"><div className="data-panel-head"><div><h2>运行侧写</h2><p>把最重要的四条运行信号放在同一视线内。</p></div><span className="data-quiet-label">READ ONLY</span></div><div className="signal-list"><div className="signal-item"><span className="signal-mark signal-mark-blue" /><div><strong>航班事实</strong><small>计划、到达、离港和取消由外部 Provider 同步</small></div><b>{loading ? "—" : sumCounts(flightCounts)}</b></div><div className="signal-item"><span className="signal-mark signal-mark-mint" /><div><strong>人员状态</strong><small>Core 维护人员与岗位能力，Edge 只读取投影</small></div><b>{loading ? "—" : sumCounts(personnelCounts)}</b></div><div className="signal-item"><span className="signal-mark signal-mark-apricot" /><div><strong>Assignment 握手</strong><small>已派发、员工收件和执行状态分开展示</small></div><b>{loading ? "—" : sumCounts(assignmentCounts)}</b></div></div></article></section>
+    <section className="data-footer-strip glass-panel"><div><span className="data-eyebrow">SYSTEM READINESS</span><strong>数据中心已连接 Core 事实源</strong></div><div><span>查询范围</span><strong>{report?.from && report?.to ? `${formatDate(report.from)} — ${formatDate(report.to)}` : "当前可见 Scope"}</strong></div><div><span>同步原则</span><strong>实时提示 + HTTP 恢复</strong></div></section>
+  </div>;
+}
+
+// Legacy fallback retained for reference while the data-center overview is active.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyOverviewPage(): JSX.Element {
   const [metrics, setMetrics] = useState({ tasks: 0, flights: 0, personnel: 0, assignments: 0 });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>();

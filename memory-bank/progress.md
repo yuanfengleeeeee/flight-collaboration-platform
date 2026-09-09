@@ -1,5 +1,27 @@
 # 项目进度
 
+## 2026-09-09 会话交接：小程序联调与真机预览准备
+
+- 针对登录后回登录页、点击卡顿、通知/历史无响应和实时连接慢的问题，两套员工小程序已补齐 Session 恢复屏障、401 回登录、请求/Socket 超时、请求并发去重、手动刷新和完整任务导航；实时连接继续只作提示，HTTP Projection 快照负责恢复。
+- 固定 `flight-dev` 已按单 `app` 容器运行 Core API、Edge API、Worker、Gateway/Web，连接独立 Core MySQL、Edge MySQL 和 Edge Redis；当前端口为 `44174/44175/48081/48082`，局域网 IP 为 `10.187.207.53`。
+- 已生成局域网真机预览包：`MINIAPP_EDGE_API_BASE_URL=http://10.187.207.53:48082 pnpm.cmd build:miniapps`；个人微信和企业微信包分别位于 `frontend/dist/employee-miniapp`、`frontend/dist/employee-wecom-miniapp`。尚未代替用户完成手机扫码、网络和防火墙验收。
+- 本次实际验证通过：Docker preflight、`scripts/verify.ps1 -Mode all`（退出码 0）、前端 `typecheck`、`lint`、`test`（5 个文件/16 个测试）、`build` 和 `git diff --check`。未执行破坏性数据库操作、迁移回滚、`down -v` 或清理数据。
+
+## 2026-09-09 Lumen 风格数据中心首页
+
+- 参考用户提供的 `lumen-ops-dashboard.html`，将暖灰纸面、半透明白卡片、蓝紫主信号、杏色辅助信号、环形脉冲、KPI 和进度条转化为 Admin Web 的真实数据中心首页。
+- 首页数据只来自现有 `getReportOverview` Core 接口：任务完成率、任务状态分布、航班、人员和 Assignment 数量均由现有事实聚合计算，不引入参考 HTML 中的虚构指标。
+- 页面继续遵循固定视口和局部滚动约束；响应式断点覆盖桌面、平板和移动 Web，数据面板在窄屏下堆叠并允许面板内部滚动。
+- 本轮实际验证：Docker 前置、前端 `typecheck`、`lint`、`test`（5 个文件 / 16 个测试）、`build` 和 `git diff --check` 均通过；未修改小程序已有用户现场。
+
+## 2026-09-09 Web 端统一视觉与固定视口重构
+
+- 已参考 Figma 项目“清爽数据运营工作台｜Dashboard”的清爽数据工作台方向，统一管理端与员工端的浅色工作区、深色控制轨、青绿色运行信号、卡片圆角、间距和焦点反馈。
+- 管理端新增固定侧栏折叠状态与可访问按钮；侧栏折叠后保留图标入口，内容区和导航区均不使用页面级滚动。
+- 管理端与员工端的列表改为嵌套数据面板局部滚动，视口根节点锁定；员工端底部导航统一为几何线性图标语言，并保留 reduced-motion 降级。
+- 本轮修改仅涉及 `frontend/apps/admin-web` 与 `frontend/apps/employee-web`，保留其他客户端已有用户修改；未改变 API、领域状态机、同步链路或数据库迁移。
+- 验证结果：Docker 前置检查在普通沙箱中无法发现 Docker Desktop，宿主权限上下文已通过并启动 Docker Engine；前端 `pnpm.cmd typecheck`、`pnpm.cmd lint`、`pnpm.cmd test`（5 个文件 / 16 个测试）和 `pnpm.cmd build` 均通过。普通沙箱的构建/测试曾因上级目录 `Access is denied` 失败，宿主权限重跑后通过。
+
 > 说明：本文保留按时间排列的验证与演进记录。较早条目中的 `Accept`、`awaiting_confirmation`、旧入口和未完成判断均为历史事实，不代表当前流程；当前口径以文末最新日期条目及 [`docs/business-process-v2.md`](../docs/business-process-v2.md) 为准。
 
 ## 2026-09-04 本轮后端业务实现收口

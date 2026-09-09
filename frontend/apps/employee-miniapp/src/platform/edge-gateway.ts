@@ -88,7 +88,7 @@ export class MiniappEdgeGateway implements SessionApi {
       const header: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json; charset=utf-8" };
       const token = authenticated ? this.getAccessToken() : undefined;
       if (token) header.Authorization = `Bearer ${token}`;
-      wx.request({ url: `${this.baseUrl.replace(/\/$/, "")}${path}`, method, data, header, success: (response) => { if (response.statusCode < 200 || response.statusCode >= 300) reject(new MiniappHttpError(response.statusCode, response.data)); else resolve(response.data as T); }, fail: reject });
+      wx.request({ url: `${this.baseUrl.replace(/\/$/, "")}${path}`, method, data, header, timeout: 8000, success: (response) => { if (response.statusCode < 200 || response.statusCode >= 300) reject(new MiniappHttpError(response.statusCode, response.data)); else resolve(response.data as T); }, fail: reject });
     });
   }
 }
@@ -151,7 +151,7 @@ export class MiniappRealtimeClient {
       return;
     }
     if (!this.running || generation !== this.generation) return;
-    const socket = wx.connectSocket({ url: this.toWebSocketURL(), protocols: [ticket.protocol, ticket.ticket_protocol] });
+    const socket = wx.connectSocket({ url: this.toWebSocketURL(), protocols: [ticket.protocol, ticket.ticket_protocol], timeout: 5000 });
     this.socket = socket;
     socket.onOpen(() => {
       if (!this.running || generation !== this.generation || this.socket !== socket) { socket.close(); return; }

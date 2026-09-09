@@ -16,7 +16,7 @@
 本地生成可交给企业微信开发者工具打开的独立包：
 
 ```powershell
-$env:MINIAPP_EDGE_API_BASE_URL = "http://127.0.0.1:8082"
+$env:MINIAPP_EDGE_API_BASE_URL = "http://127.0.0.1:48082"
 pnpm build:miniapps
 ```
 

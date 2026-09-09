@@ -3,6 +3,7 @@
   <view class="title">我的任务</view>
   <view class="muted">任务事实来自 Edge Projection；实时提示丢失时，刷新仍会重新获取完整快照。</view>
   <view class="realtime-state">实时：{{realtimeState}}</view>
+  <button class="button secondary refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="reload">刷新任务</button>
   <view class="projection-health">快照：{{projectionLagState === 'known' ? ('延迟 ' + projectionLagSeconds + ' 秒') : '同步延迟未知'}} · 版本 {{projectionRevision}}</view>
   <view wx:if="{{error}}" class="error">{{error}}</view>
   <view wx:if="{{loading}}" class="card muted">正在同步任务…</view>
@@ -12,5 +13,5 @@
     <text class="task-card__meta">{{item.receipt_label}} · {{item.area_name}} · {{item.planned_at}}</text>
     <text class="task-card__meta">{{item.message}}</text>
   </view>
-  <view class="bottom-nav"><navigator class="bottom-nav__item active" url="/pages/tasks/index">任务</navigator><navigator class="bottom-nav__item" url="/pages/account/index">账号</navigator></view>
+  <view class="bottom-nav"><navigator class="bottom-nav__item active" url="/pages/tasks/index">任务</navigator><navigator class="bottom-nav__item" url="/pages/notifications/index">通知</navigator><navigator class="bottom-nav__item" url="/pages/history/index">历史</navigator><navigator class="bottom-nav__item" url="/pages/exceptions/index">异常</navigator><navigator class="bottom-nav__item" url="/pages/account/index">账号</navigator></view>
 </view>

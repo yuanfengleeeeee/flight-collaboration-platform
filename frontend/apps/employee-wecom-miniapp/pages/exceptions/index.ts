@@ -1,8 +1,9 @@
 import { changeActionsForTaskStatus, createClientID, suggestedChangeActionForExceptionCategory } from "@flight/task-domain";
-import { edgeGateway } from "../../src/app/session";
+import { edgeGateway, isMiniappUnauthorized, relaunchMiniappLogin, restoreMiniappSession } from "../../src/app/session";
 import type { EdgeTaskProjection, ExceptionSeverity, TaskChangeAction } from "@flight/contracts";
 
 type RequestedChangeAction = "" | TaskChangeAction;
+let taskLoadPromise: Promise<void> | undefined;
 const changeActionOptions = ["仅上报，不申请变更", "申请暂停", "申请重新预分配", "申请调整计划时间", "申请取消", "申请恢复执行"];
 const changeActionValues: RequestedChangeAction[] = ["", "pause", "reassign", "reschedule", "cancel", "resume"];
 
@@ -17,9 +18,23 @@ function actionStateForTask(task: EdgeTaskProjection | undefined): { changeActio
 Page({
   data: { tasks: [] as EdgeTaskProjection[], taskID: "", taskIndex: 0, categoryOptions: ["保障冲突（申请重新预分配）", "航班延误（申请调整任务）", "航班取消（申请取消任务）", "突发事件（申请值班经理处置）", "其他现场异常"], categoryIndex: 0, category: "保障冲突（申请重新预分配）", changeActionOptions, changeActionValues, changeActionIndex: 2, changeAction: "reassign" as RequestedChangeAction, targetPlannedAt: "", severity: "medium" as ExceptionSeverity, description: "", loading: true, submitting: false, error: "", notice: "" },
 
-  onShow() { this.loadTasks(); },
+  onShow() { void this.prepare(); },
+
+  async prepare() {
+    if (!(await restoreMiniappSession())) {
+      relaunchMiniappLogin();
+      return;
+    }
+    void this.loadTasks();
+  },
 
   async loadTasks() {
+    if (taskLoadPromise) return taskLoadPromise;
+    taskLoadPromise = this.refreshTasks().finally(() => { taskLoadPromise = undefined; });
+    return taskLoadPromise;
+  },
+
+  async refreshTasks() {
     this.setData({ loading: true, error: "" });
     try {
       const response = await edgeGateway.listTasks();
@@ -27,6 +42,10 @@ Page({
       const taskIndex = Math.max(0, tasks.findIndex((task) => task.public_id === this.data.taskID));
       this.setData({ tasks, taskIndex, taskID: tasks[taskIndex]?.public_id || "", loading: false, ...actionStateForTask(tasks[taskIndex]) });
     } catch (error) {
+      if (isMiniappUnauthorized(error)) {
+        relaunchMiniappLogin();
+        return;
+      }
       this.setData({ loading: false, error: error instanceof Error ? error.message : "任务读取失败" });
     }
   },

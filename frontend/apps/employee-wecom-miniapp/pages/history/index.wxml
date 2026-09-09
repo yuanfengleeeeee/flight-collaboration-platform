@@ -2,6 +2,7 @@
   <view class="eyebrow">WECOM / HISTORY</view>
   <view class="title">历史任务</view>
   <view class="muted">这里只展示已经完成或取消的个人任务 Projection。</view>
+  <button class="button secondary refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="reload">刷新历史</button>
   <view wx:if="{{error}}" class="error">{{error}}</view>
   <view wx:if="{{loading}}" class="card muted">正在读取历史任务…</view>
   <view wx:if="{{!loading && items.length === 0}}" class="card muted">暂无历史任务</view>
