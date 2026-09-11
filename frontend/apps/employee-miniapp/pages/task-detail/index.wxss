@@ -1,0 +1,10 @@
+.detail-message { margin-top: 22rpx; color: #163d48; font-size: 30rpx; line-height: 1.7; }
+.projection-health { margin-top: 18rpx; padding: 12rpx 16rpx; color: #4c7776; background: #f1f7f5; border: 1rpx solid #d6e8e2; border-radius: 10rpx; font-size: 22rpx; }
+.projection-health.projection-unknown { color: #8b6a2b; background: #fff8e8; border-color: #f0dfb3; }
+.command-panel { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; margin-top: 18rpx; padding: 18rpx; background: #eaf4f1; border: 1rpx solid #d2e7e2; border-radius: 10rpx; }
+.command-panel__title { color: #256a68; font-size: 28rpx; font-weight: 700; }
+.command-panel__message { flex: 1; color: #668785; font-size: 22rpx; line-height: 1.6; }
+.command-panel__status { flex: 0 0 auto; padding: 8rpx 12rpx; border-radius: 999rpx; font-size: 20rpx; font-weight: 700; }
+.command-panel__status.command-pending, .command-panel__status.command-syncing { color: #8b621f; background: #fff2d6; }
+.command-panel__status.command-confirmed { color: #28746a; background: #e0f1ec; }
+.command-panel__status.command-failed { color: #8d4b4b; background: #fae8e6; }

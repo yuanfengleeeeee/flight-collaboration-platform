@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS employee_projection_cursor (
+    employee_public_id CHAR(36) NOT NULL PRIMARY KEY,
+    revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

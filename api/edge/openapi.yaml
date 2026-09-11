@@ -1,0 +1,681 @@
+openapi: 3.0.3
+info:
+  title: Flight Collaboration Platform Edge API
+  version: 1.0.0
+  description: Public mobile boundary. Edge serves projections and stores commands.
+servers:
+  - url: /
+paths:
+  /health/live:
+    get:
+      summary: Edge process liveness
+      responses:
+        '200': {description: Process is alive}
+  /health/ready:
+    get:
+      summary: Edge dependency readiness
+      responses:
+        '200': {description: Ready}
+        '503': {description: Required dependency unavailable}
+  /api/v1/auth/password/login:
+    post:
+      summary: Authenticate an employee with employee number and password
+      description: >
+        For an employee miniapp, an authenticated password result may require a
+        one-time provider binding before an Edge session is issued. The Core
+        service never returns or stores the plaintext password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordLoginRequest'}
+      responses:
+        '200':
+          description: Authenticated session or binding required
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthResponse'}
+        '401': {description: Invalid employee credentials or expired binding ticket}
+        '403': {description: Staff is inactive}
+        '503': {description: Core identity service unavailable}
+  /api/v1/auth/exchange:
+    post:
+      summary: Exchange a verified external provider code for an Edge session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProviderExchangeRequest'}
+      responses:
+        '200':
+          description: Edge session issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthResponse'}
+        '403': {description: External identity is unmapped or staff is inactive}
+        '503': {description: Core identity service unavailable}
+  /api/v1/auth/bindings/complete:
+    post:
+      summary: Complete a one-time external identity binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BindingCompleteRequest'}
+      responses:
+        '200':
+          description: Binding completed and Edge session issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthResponse'}
+        '401': {description: Binding ticket invalid or provider code invalid}
+        '409': {description: External identity already belongs to another staff member}
+  /api/v1/auth/refresh:
+    post:
+      summary: Rotate a refresh token and issue a short-lived access token
+      description: Send the refresh token in JSON or as a Bearer credential in the Authorization header. It is never accepted from a URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RefreshRequest'}
+      responses:
+        '200':
+          description: Rotated Edge session
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthResponse'}
+        '401': {description: Refresh token expired, revoked, or replayed}
+  /api/v1/auth/me:
+    get:
+      summary: Read the current employee session
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionResponse'}
+        '401': {description: Missing, invalid, expired, or revoked access token}
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke the current employee session
+      security:
+        - bearerAuth: []
+      responses:
+        '204': {description: Session revoked}
+        '401': {description: Missing, invalid, expired, or revoked access token}
+  /api/v1/tasks:
+    get:
+      summary: Read the caller's task projection
+      description: Reads only the Edge projection filtered by the authenticated employee principal.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Full employee task projection snapshot returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EdgeTaskList'}
+        '503': {description: Projection store unavailable}
+  /api/v1/history:
+    get:
+      summary: Read the caller's completed and cancelled task projections
+      description: History is an employee-scoped Edge read model. Core remains the source of truth; reconnect or projection repair can change the snapshot.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [completed, cancelled, all]}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Employee history projection
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EdgeHistoryList'}
+        '400': {description: Invalid history filter}
+        '401': {description: Missing or invalid employee session}
+        '503': {description: Projection store unavailable}
+  /api/v1/notifications:
+    get:
+      summary: Read the caller's notification projection
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [unread, read]}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Employee notification projection
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EdgeNotificationList'}
+        '400': {description: Invalid notification filter}
+        '401': {description: Missing or invalid employee session}
+        '503': {description: Notification store unavailable}
+  /api/v1/notifications/{notificationPublicID}/read:
+    post:
+      summary: Mark an employee notification as read
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: notificationPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200': {description: Notification marked read}
+        '401': {description: Missing or invalid employee session}
+        '404': {description: Notification not found for the authenticated employee}
+        '503': {description: Notification store unavailable}
+  /api/v1/realtime/ticket:
+    post:
+      summary: Issue a single-use employee WebSocket connection ticket
+      description: The short-lived ticket is for browser WebSocket subprotocol negotiation and must not be placed in a URL query parameter.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Short-lived WebSocket connection ticket issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RealtimeTicketResponse'}
+        '401': {description: Missing, invalid, expired, or revoked access token}
+        '503': {description: Realtime notification service unavailable}
+  /api/v1/ws:
+    get:
+      summary: Open the employee task notification WebSocket
+      description: Offer flight.realtime.v1 and, for browser clients, flight.realtime.ticket.{ticket} as Sec-WebSocket-Protocol values. Messages are best-effort refresh hints; the client must re-read GET /api/v1/tasks.
+      security:
+        - bearerAuth: []
+      responses:
+        '101': {description: WebSocket upgraded; server selects flight.realtime.v1}
+        '400': {description: Missing realtime protocol or rejected Origin}
+        '401': {description: Missing, invalid, expired, or revoked employee identity}
+        '503': {description: Realtime notification service unavailable}
+  /api/v1/ws/native:
+    get:
+      summary: Open the employee task WebSocket for native miniapps
+      description: Native miniapps use the same single-use ticket and application protocol but do not have a browser Origin. The ticket remains mandatory; messages are best-effort refresh hints.
+      responses:
+        '101': {description: WebSocket upgraded; server selects flight.realtime.v1}
+        '400': {description: Missing realtime protocol}
+        '401': {description: Missing, invalid, expired, or revoked employee identity}
+        '503': {description: Realtime notification service unavailable}
+  /api/v1/tasks/{taskPublicID}/received:
+    post:
+      summary: Queue an employee task receipt acknowledgement
+      description: Records that the employee received the dispatch notice. This is a handshake only and is not an approval or refusal operation.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmployeeTaskCommandRequest'}
+      responses:
+        '202':
+          description: Receipt command persisted in the Edge command store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandAcceptedResponse'}
+        '400': {description: Invalid command}
+        '409': {description: Command ID was already used with different content}
+        '503': {description: Command store unavailable}
+  /api/v1/tasks/{taskPublicID}/start:
+    post:
+      summary: Queue an employee task start command
+      description: Begins execution after the employee has acknowledged receipt. The employee cannot refuse the Assignment; conflicts are reported through the exception endpoint.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmployeeTaskCommandRequest'}
+      responses:
+        '202':
+          description: Start command persisted in the Edge command store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandAcceptedResponse'}
+        '400': {description: Invalid command}
+        '409': {description: Command ID was already used with different content}
+        '503': {description: Command store unavailable}
+  /api/v1/tasks/{taskPublicID}/accept:
+    post:
+      summary: Queue the legacy employee task start command
+      description: Deprecated compatibility alias for start. It does not represent employee approval and cannot reject an Assignment.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmployeeTaskCommandRequest'}
+      responses:
+        '202':
+          description: Command persisted in the Edge command store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandAcceptedResponse'}
+        '400': {description: Invalid command}
+        '409': {description: Command ID was already used with different content}
+        '503': {description: Command store unavailable}
+  /api/v1/tasks/{taskPublicID}/complete:
+    post:
+      summary: Queue an employee task completion command
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmployeeTaskCommandRequest'}
+      responses:
+        '202':
+          description: Command persisted in the Edge command store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandAcceptedResponse'}
+        '400': {description: Invalid command}
+        '409': {description: Command ID was already used with different content}
+        '503': {description: Command store unavailable}
+  /api/v1/tasks/{taskPublicID}/exceptions:
+    post:
+      summary: Queue an employee task-site exception report
+      description: The report is persisted as an Edge Command and becomes a Core exception fact only after Core validates assignment, version and permission.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmployeeExceptionReportRequest'}
+      responses:
+        '202':
+          description: Exception command persisted in Edge
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandAcceptedResponse'}
+        '400': {description: Invalid exception report}
+        '409': {description: Command ID was already used with different content}
+        '503': {description: Command store unavailable}
+  /api/v1/commands/{commandID}:
+    get:
+      summary: Read the status of an employee command
+      description: Returns a client-safe synchronization status for a command owned by the authenticated employee.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: commandID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Command status returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandStatusResponse'}
+        '401': {description: Missing or invalid employee session}
+        '403': {description: Command belongs to another employee}
+        '404': {description: Command not found}
+        '503': {description: Command status unavailable}
+  /api/v1/commands:
+    post:
+      summary: Store a versioned mobile command for Core
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommandEnvelope'}
+      responses:
+        '202':
+          description: Command accepted for synchronization
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandAcceptedResponse'}
+        '400': {description: Invalid command}
+        '403': {description: Command actor does not match the authenticated employee}
+        '409': {description: Command ID was already used with different content}
+        '503': {description: Command store unavailable}
+  /internal/sync/v1/events:
+    post:
+      summary: Apply a Core event to Edge Inbox and Projection
+      responses:
+        '202': {description: Event accepted or duplicate}
+  /internal/sync/v1/commands/pending:
+    get:
+      summary: Pull pending Edge commands for the Core Worker
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: worker_id
+          in: query
+          required: false
+          schema: {type: string, maxLength: 128}
+        - name: lease_seconds
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 3600, default: 30}
+      responses:
+        '200': {description: Pending commands returned}
+  /internal/sync/v1/commands/{commandID}/ack:
+    post:
+      summary: Acknowledge a Core Worker command result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandAcknowledgement'
+      responses:
+        '204': {description: Command acknowledgement persisted}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    PasswordLoginRequest:
+      type: object
+      required: [employee_no, password, client]
+      properties:
+        employee_no: {type: string, maxLength: 64}
+        password: {type: string, format: password, minLength: 1}
+        client: {type: string, enum: [employee-miniapp, employee-wecom-miniapp, employee-web]}
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_app: {type: string, maxLength: 128}
+    ProviderExchangeRequest:
+      type: object
+      required: [provider, provider_code, client]
+      properties:
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_code: {type: string, format: password}
+        client: {type: string, enum: [employee-miniapp, employee-wecom-miniapp, employee-web]}
+        redirect_uri: {type: string, format: uri}
+    BindingCompleteRequest:
+      type: object
+      required: [binding_ticket, provider, provider_code, client]
+      properties:
+        binding_ticket: {type: string, format: uuid}
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_code: {type: string, format: password}
+        client: {type: string, enum: [employee-miniapp, employee-wecom-miniapp, employee-web]}
+        redirect_uri: {type: string, format: uri}
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: {type: string, format: password}
+    AuthResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/AuthResult'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    AuthResult:
+      type: object
+      required: [state]
+      properties:
+        state: {type: string, enum: [authenticated, binding_required]}
+        binding_ticket: {type: string, format: uuid}
+        access_token: {type: string}
+        refresh_token: {type: string}
+        token_type: {type: string, example: Bearer}
+        expires_in: {type: integer, format: int64}
+        session_public_id: {type: string, format: uuid}
+        principal: {$ref: '#/components/schemas/Principal'}
+    SessionResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [session_public_id, expires_at, principal]
+          properties:
+            session_public_id: {type: string, format: uuid}
+            expires_at: {type: string, format: date-time}
+            principal: {$ref: '#/components/schemas/Principal'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    Principal:
+      type: object
+      required: [public_id, type, role]
+      properties:
+        public_id: {type: string, format: uuid}
+        type: {type: string, enum: [human]}
+        role: {type: string}
+    ErrorResponse:
+      type: object
+      required: [code, message, request_id, trace_id]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        request_id: {type: string}
+        trace_id: {type: string}
+    EdgeTaskList:
+      type: object
+      required: [items, source, sync_mode, snapshot_at, projection_revision, projection_lag_seconds, projection_lag_state, next_cursor, reset_required, request_id, trace_id]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/EdgeTaskProjection'}
+        source: {type: string, example: edge_projection}
+        sync_mode: {type: string, enum: [full_snapshot]}
+        snapshot_at: {type: string, format: date-time}
+        projection_revision: {type: integer, format: int64, minimum: 0, description: Durable revision scoped to the authenticated employee}
+        projection_lag_seconds: {type: number, format: double, minimum: 0}
+        projection_lag_state: {type: string, enum: [known, unknown]}
+        next_cursor: {type: string, nullable: true, description: Reserved for a future employee-scoped incremental cursor}
+        reset_required: {type: boolean, description: True only when an incremental cursor must fall back to a full snapshot}
+        request_id: {type: string}
+        trace_id: {type: string}
+    RealtimeTicketResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [ticket, protocol, ticket_protocol, expires_at]
+          properties:
+            ticket: {type: string, description: Single-use short-lived opaque ticket}
+            protocol: {type: string, enum: [flight.realtime.v1]}
+            ticket_protocol: {type: string, description: Value to offer as a WebSocket subprotocol}
+            expires_at: {type: string, format: date-time}
+        request_id: {type: string}
+        trace_id: {type: string}
+    RealtimeReady:
+      type: object
+      required: [type, protocol, heartbeat_interval_seconds, idle_timeout_seconds]
+      properties:
+        type: {type: string, enum: [ready]}
+        protocol: {type: string, enum: [flight.realtime.v1]}
+        heartbeat_interval_seconds: {type: integer, minimum: 1}
+        idle_timeout_seconds: {type: integer, minimum: 1}
+    RealtimeTaskChanged:
+      type: object
+      required: [type, notification_id, task_public_id, sync_version, reason, issued_at]
+      properties:
+        type: {type: string, enum: [task_changed]}
+        notification_id: {type: string, format: uuid}
+        task_public_id: {type: string, format: uuid}
+        sync_version: {type: integer, format: int64, minimum: 1}
+        reason: {type: string}
+        issued_at: {type: string, format: date-time}
+    EdgeTaskProjection:
+      type: object
+      required: [public_id, employee_public_id, flight_display_no, task_name, area_name, planned_at, message, sync_version, updated_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        assignment_public_id: {type: string, format: uuid}
+        employee_public_id: {type: string, format: uuid}
+        flight_display_no: {type: string}
+        task_name: {type: string}
+        area_name: {type: string}
+        planned_at: {type: string, format: date-time}
+        status: {type: string, enum: [pending_dispatch, awaiting_confirmation, assigned, in_progress, completed, cancelled]}
+        business_status: {type: string, enum: [pending_dispatch, awaiting_confirmation, assigned, in_progress, completed, cancelled]}
+        message: {type: string}
+        receipt_status: {type: string, enum: [pending, received]}
+        received_at: {type: string, format: date-time}
+        sync_version: {type: integer, format: int64, minimum: 1}
+        updated_at: {type: string, format: date-time}
+    EdgeHistoryList:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total, source]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/EdgeTaskProjection'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+            source: {type: string, example: edge_projection}
+        request_id: {type: string}
+        trace_id: {type: string}
+    EdgeNotificationList:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/EdgeNotification'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    EdgeNotification:
+      type: object
+      required: [public_id, employee_public_id, title, message, status, sync_version, updated_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        employee_public_id: {type: string, format: uuid}
+        title: {type: string}
+        message: {type: string}
+        status: {type: string, enum: [unread, read]}
+        sync_version: {type: integer, format: int64, minimum: 1}
+        updated_at: {type: string, format: date-time}
+    EmployeeTaskCommandRequest:
+      type: object
+      required: [command_id, assignment_public_id, expected_sync_version]
+      properties:
+        command_id: {type: string, format: uuid, description: Client-generated stable idempotency key}
+        assignment_public_id: {type: string, format: uuid}
+        expected_sync_version: {type: integer, format: int64, minimum: 1}
+        client_occurred_at: {type: string, format: date-time}
+        note: {type: string, maxLength: 255}
+    EmployeeExceptionReportRequest:
+      type: object
+      required: [command_id, assignment_public_id, expected_sync_version, category, severity, description]
+      properties:
+        command_id: {type: string, format: uuid, description: Client-generated stable idempotency key}
+        assignment_public_id: {type: string, format: uuid}
+        expected_sync_version: {type: integer, format: int64, minimum: 1}
+        category: {type: string, minLength: 1, maxLength: 64}
+        severity: {type: string, enum: [low, medium, high, critical]}
+        description: {type: string, minLength: 1, maxLength: 1024}
+        client_occurred_at: {type: string, format: date-time}
+    CommandAcceptedResponse:
+      type: object
+      required: [command_id, status, duplicate, request_id, trace_id]
+      properties:
+        command_id: {type: string, format: uuid}
+        status: {type: string, enum: [pending, syncing, confirmed, failed]}
+        duplicate: {type: boolean}
+        request_id: {type: string}
+        trace_id: {type: string}
+    CommandStatusResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [command_id, command_type, aggregate_id, status, attempts, created_at, updated_at]
+          properties:
+            command_id: {type: string, format: uuid}
+            command_type: {type: string}
+            aggregate_id: {type: string, format: uuid}
+            status: {type: string, enum: [pending, syncing, confirmed, failed]}
+            attempts: {type: integer, minimum: 0}
+            next_attempt_at: {type: string, format: date-time}
+            error_code: {type: string, example: command_failed}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+        request_id: {type: string}
+        trace_id: {type: string}
+    CommandAcknowledgement:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [applied, sent, retry, failed, rejected]}
+        reason: {type: string}
+        lease_owner: {type: string, maxLength: 128}
+        next_attempt_at: {type: string, format: date-time}
+    CommandEnvelope:
+      type: object
+      required: [command_id, command_type, schema_version, actor_public_id, aggregate_id, occurred_at, trace_id, payload]
+      properties:
+        command_id: {type: string, format: uuid}
+        command_type: {type: string}
+        schema_version: {type: integer, minimum: 1}
+        actor_public_id: {type: string, format: uuid}
+        aggregate_id: {type: string, format: uuid}
+        occurred_at: {type: string, format: date-time}
+        trace_id: {type: string}
+        payload: {type: object}

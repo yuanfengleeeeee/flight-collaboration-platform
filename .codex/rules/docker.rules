@@ -1,0 +1,27 @@
+# Allow the project's standard Docker preflight to run in the host context.
+# Docker Desktop remains on-demand; this only gives the script access to the
+# Docker Desktop named pipe when Codex is operating in the normal sandbox.
+prefix_rule(
+    pattern = ["powershell", "-ExecutionPolicy", "Bypass", "-File", "scripts/ensure-docker.ps1"],
+    decision = "allow",
+    justification = "Project Docker preflight needs host Docker Desktop named-pipe access",
+)
+
+prefix_rule(
+    pattern = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", "scripts/ensure-docker.ps1"],
+    decision = "allow",
+    justification = "Project Docker preflight needs host Docker Desktop named-pipe access",
+)
+
+# The unified verification entrypoint performs the same preflight before tests.
+prefix_rule(
+    pattern = ["powershell", "-ExecutionPolicy", "Bypass", "-File", "scripts/verify.ps1"],
+    decision = "allow",
+    justification = "Project verification needs host Docker Desktop named-pipe access",
+)
+
+prefix_rule(
+    pattern = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", "scripts/verify.ps1"],
+    decision = "allow",
+    justification = "Project verification needs host Docker Desktop named-pipe access",
+)

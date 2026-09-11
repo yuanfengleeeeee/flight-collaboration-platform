@@ -1,0 +1,14 @@
+.git
+.tmp
+docs
+memory-bank
+web-admin
+miniapp
+api
+frontend/**/node_modules/
+frontend/**/dist/
+frontend/**/coverage/
+.codex/
+*.md
+*.err
+*.log

@@ -1,0 +1,2282 @@
+openapi: 3.0.3
+info:
+  title: Flight Collaboration Platform Core API
+  version: 1.0.0
+  description: Internal management and Core business boundary. Core owns business truth.
+servers:
+  - url: /
+paths:
+  /health/live:
+    get:
+      summary: Core process liveness
+      responses:
+        '200': {description: Process is alive}
+  /health/ready:
+    get:
+      summary: Core dependency readiness
+      responses:
+        '200': {description: Ready}
+        '503': {description: Required dependency unavailable}
+  /internal/identity/v1/password/verify:
+    post:
+      summary: Verify an employee password for the Edge identity boundary
+      description: Internal Core-owned contract. Requires X-Internal-Identity-Key in local shared-key mode.
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordVerifyRequest'}
+      responses:
+        '200':
+          description: Password verified or binding required
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PasswordVerifyResponse'}
+        '401': {description: Invalid credentials or internal identity key}
+        '403': {description: Staff is inactive}
+  /internal/identity/v1/staff/status:
+    post:
+      summary: Resolve the current active status of a Core Staff
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [public_id]
+              properties:
+                public_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Active Staff returned}
+        '403': {description: Staff is inactive}
+  /internal/identity/v1/providers/exchange:
+    post:
+      summary: Resolve a provider authorization code to a Core Staff
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProviderExchangeRequest'}
+      responses:
+        '200': {description: Staff identity resolved}
+        '403': {description: Provider identity is unmapped or staff is inactive}
+  /internal/identity/v1/bindings/complete:
+    post:
+      summary: Complete a Core-owned one-time external identity binding
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BindingCompleteRequest'}
+      responses:
+        '200': {description: Binding completed and Staff returned}
+        '401': {description: Invalid provider code or binding ticket}
+        '409': {description: External identity binding conflict}
+  /api/v1/admin/auth/sso/start:
+    get:
+      summary: Start management-console SSO
+      description: Creates a one-time server-side SSO state and redirects the browser to the configured management identity provider (currently enterprise WeCom OAuth; OIDC remains an optional adapter).
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema: {type: string, minLength: 16, maxLength: 256}
+        - name: redirect_uri
+          in: query
+          required: true
+          schema: {type: string, format: uri}
+      responses:
+        '302': {description: Redirect to the configured management identity provider}
+        '400': {description: Invalid redirect URI or state}
+        '503': {description: SSO provider unavailable}
+  /api/v1/admin/auth/sso/exchange:
+    post:
+      summary: Exchange a management SSO authorization code
+      description: Consumes the server-side state and authorization code, resolves a provisioned admin identity, and issues a Core audience JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminSSOExchangeRequest'}
+      responses:
+        '200':
+          description: Management session issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminSSOExchangeResponse'}
+        '400': {description: Invalid SSO request}
+        '401': {description: Invalid or expired SSO state/code}
+        '403': {description: Admin identity is unmapped or inactive}
+        '503': {description: SSO provider unavailable}
+  /api/v1/admin/auth/me:
+    get:
+      summary: Get the current management session
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Current management session
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminSessionResponse'}
+        '401': {description: Missing, invalid, expired, or revoked management session}
+  /api/v1/admin/auth/logout:
+    post:
+      summary: Revoke the current management session
+      security: [{bearerAuth: []}]
+      responses:
+        '204': {description: Management session revoked}
+        '401': {description: Missing, invalid, expired, or revoked management session}
+  /api/v1/areas:
+    get:
+      summary: List operation areas
+      operationId: listAreas
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive substring match against area code or name
+          schema: {type: string, maxLength: 128}
+        - name: include_disabled
+          in: query
+          schema: {type: boolean, default: false}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200': {description: Operation areas returned, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementListResponse'}}}}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks area read permission}
+    post:
+      summary: Create an operation area
+      operationId: createArea
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AreaWriteRequest'}}}
+      responses:
+        '201': {description: Area created, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks area manage permission}
+        '409': {description: Area conflicts with an existing fact}
+  /api/v1/areas/{publicID}:
+    patch:
+      summary: Update an operation area
+      operationId: updateArea
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: publicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AreaPatchRequest'}}}
+      responses:
+        '200': {description: Area updated, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks area manage permission}
+        '404': {description: Area not found}
+        '409': {description: Area is active or conflicts with an existing fact}
+  /api/v1/teams:
+    get:
+      summary: List service teams
+      operationId: listTeams
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive substring match against team or area code/name
+          schema: {type: string, maxLength: 128}
+        - name: area_public_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: include_disabled
+          in: query
+          schema: {type: boolean, default: false}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200': {description: Teams returned, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementListResponse'}}}}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks team read permission}
+    post:
+      summary: Create a service team
+      operationId: createTeam
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/TeamWriteRequest'}}}
+      responses:
+        '201': {description: Team created, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks team manage permission}
+        '409': {description: Team conflicts with an existing fact}
+  /api/v1/teams/{publicID}:
+    patch:
+      summary: Update a service team
+      operationId: updateTeam
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: publicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/TeamPatchRequest'}}}
+      responses:
+        '200': {description: Team updated, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks team manage permission}
+        '404': {description: Team not found}
+        '409': {description: Team is active or conflicts with an existing fact}
+  /api/v1/personnel:
+    post:
+      summary: Create a project employee
+      operationId: createPersonnel
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PersonnelWriteRequest'}}}
+      responses:
+        '201': {description: Project employee created, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks personnel manage permission}
+        '409': {description: Employee conflicts with an existing fact}
+    get:
+      summary: List personnel visible to the authenticated management principal
+      operationId: listPersonnel
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: work_state
+          in: query
+          required: false
+          schema: {type: string, enum: [idle, reserved, busy, unavailable]}
+        - name: team_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: area_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: page
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200': {description: Paginated personnel list, content: {application/json: {schema: {$ref: '#/components/schemas/PersonnelListResponse'}}}}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks personnel read permission or scope}
+  /api/v1/personnel/{publicID}:
+    patch:
+      summary: Update a project employee
+      operationId: updatePersonnel
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: publicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PersonnelPatchRequest'}}}
+      responses:
+        '200': {description: Employee updated, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks personnel manage permission}
+        '404': {description: Employee not found}
+        '409': {description: Employee is active or conflicts with an existing fact}
+  /api/v1/personnel/{publicID}/password/reset:
+    post:
+      summary: Reset a project employee password
+      operationId: resetPersonnelPassword
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: publicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PasswordResetRequest'}}}
+      responses:
+        '204': {description: Password reset}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks personnel manage permission}
+        '404': {description: Employee not found}
+  /api/v1/templates:
+    get:
+      summary: List task templates
+      operationId: listTemplates
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: include_disabled
+          in: query
+          schema: {type: boolean, default: false}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200': {description: Templates returned, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementListResponse'}}}}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks template read permission}
+    post:
+      summary: Create a task template
+      operationId: createTemplate
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/TemplateWriteRequest'}}}
+      responses:
+        '201': {description: Template created, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks template manage permission}
+        '409': {description: Template version conflicts with an existing fact}
+  /api/v1/templates/{publicID}:
+    patch:
+      summary: Update a task template
+      operationId: updateTemplate
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: publicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/TemplatePatchRequest'}}}
+      responses:
+        '200': {description: Template updated, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks template manage permission}
+        '404': {description: Template not found}
+  /api/v1/flights:
+    get:
+      summary: List managed flights
+      operationId: listManagedFlights
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: operating_date
+          in: query
+          schema: {type: string, format: date}
+        - name: include_terminal
+          in: query
+          schema: {type: boolean, default: false}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200': {description: Flights returned, content: {application/json: {schema: {$ref: '#/components/schemas/ManagementListResponse'}}}}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks flight read permission}
+  /api/v1/admin/identities:
+    get:
+      summary: List management identities
+      operationId: listAdminIdentities
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: include_disabled
+          in: query
+          schema: {type: boolean, default: false}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200': {description: Management identities returned, content: {application/json: {schema: {$ref: '#/components/schemas/AdminIdentityListResponse'}}}}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks admin identity management permission}
+    post:
+      summary: Create a management identity mapping
+      operationId: createAdminIdentity
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AdminIdentityWriteRequest'}}}
+      responses:
+        '201': {description: Management identity created, content: {application/json: {schema: {$ref: '#/components/schemas/AdminIdentityResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks admin identity management permission}
+        '409': {description: Identity conflicts with an existing mapping}
+  /api/v1/admin/identities/{publicID}:
+    patch:
+      summary: Update a management identity mapping
+      operationId: updateAdminIdentity
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: publicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AdminIdentityPatchRequest'}}}
+      responses:
+        '200': {description: Management identity updated, content: {application/json: {schema: {$ref: '#/components/schemas/AdminIdentityResponse'}}}}
+        '400': {description: Invalid management input}
+        '403': {description: Principal lacks admin identity management permission}
+        '404': {description: Management identity not found}
+  /api/v1/assignments:
+    get:
+      summary: List Assignments visible to the authenticated management principal
+      operationId: listAssignments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        - name: task_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: personnel_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: page
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Paginated Assignment list
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssignmentListResponse'}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks Assignment read permission or scope}
+        '503': {description: Core repository unavailable}
+  /api/v1/tasks:
+    get:
+      summary: List Core tasks visible to the authenticated human principal
+      description: >
+        Core task creation is driven by the Flight arrival transaction in this
+        slice. This read endpoint supports status and flight filters with
+        server-enforced Team/Area/Assigned scope; it never accepts arbitrary
+        SQL filters.
+      operationId: listTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [pending_dispatch, awaiting_confirmation, assigned, in_progress, completed, cancelled, paused]}
+        - name: flight_public_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: page
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Paginated task list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks task read permission or scope}
+        '503': {description: Authentication or Core repository unavailable}
+  /api/v1/tasks/{taskPublicID}:
+    get:
+      summary: Get a Core task with candidates and assignment
+      operationId: getTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetailResponse'
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks task read permission or scope}
+        '404': {description: Task not found or outside the principal scope}
+  /api/v1/tasks/{taskPublicID}/history:
+    get:
+      summary: Read the immutable Core task history timeline
+      description: >
+        Returns task, assignment and personnel state transitions for a task
+        visible to the authenticated principal. The response is read-only and
+        is assembled from Core status history tables.
+      operationId: getTaskHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Task history timeline
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskHistoryResponse'}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks task read permission or scope}
+        '404': {description: Task not found or outside the principal scope}
+  /api/v1/exceptions:
+    get:
+      summary: List task-site exceptions reported to Core
+      description: Returns exception facts scoped by the authenticated management principal.
+      operationId: listTaskExceptions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [open, acknowledged, resolved, rejected]}
+        - name: severity
+          in: query
+          schema: {type: string, enum: [low, medium, high, critical]}
+        - name: task_public_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: personnel_public_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Exception list
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExceptionListResponse'}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks exception read permission or scope}
+        '400': {description: Invalid exception filter}
+  /api/v1/exceptions/{publicID}:
+    patch:
+      summary: Update a task exception state
+      description: A management principal may acknowledge, resolve or reject an exception within its Core Scope. The transition and audit write are transactional.
+      operationId: updateTaskException
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: publicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ExceptionUpdateRequest'}
+      responses:
+        '200':
+          description: Exception state updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExceptionUpdateResponse'}
+        '400': {description: Invalid exception state or note}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks exception management permission or scope}
+        '404': {description: Exception not found in the current scope}
+        '409': {description: Exception transition conflicts with its current state}
+  /api/v1/reports/overview:
+    get:
+      summary: Read the scoped operational report overview
+      description: Aggregates current Core facts by task, flight, assignment, personnel and exception status. Date filters use flight operating_date.
+      operationId: getReportOverview
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          schema: {type: string, format: date}
+        - name: to
+          in: query
+          schema: {type: string, format: date}
+      responses:
+        '200':
+          description: Operational report overview
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReportOverviewResponse'}
+        '400': {description: Invalid date range}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks analytics read permission or scope}
+  /internal/integration/v1/flights/{flightPublicID}/arrival:
+    post:
+      summary: Record a flight arrival and generate its first task instance
+      description: >
+        Compatibility endpoint for a trusted upstream arrival event. New
+        providers should use the batch flight-source sync endpoint so the event
+        is durably staged before task generation. Replaying the same
+        source_event_id is idempotent; management clients must not call this
+        route and Edge is not involved in this operation.
+      operationId: recordFlightArrival
+      security: [{flightSourceKey: []}]
+      parameters:
+        - name: flightPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlightArrivalRequest'
+      responses:
+        '201':
+          description: Arrival recorded and task generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlightArrivalResponse'
+        '200':
+          description: Duplicate arrival replay or an already-arrived flight
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlightArrivalResponse'
+        '400':
+          description: Invalid input or invalid active task template
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Flight not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Source event conflict or illegal flight transition
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: Internal processing failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /internal/sync/v1/commands/pending:
+    get:
+      summary: Pull pending Edge commands (machine boundary)
+      responses:
+         '200': {description: Commands returned}
+  /api/v1/tasks/{taskPublicID}/confirm:
+    post:
+      summary: Confirm a proposed task candidate
+      description: >
+        A human principal confirms one candidate. Core revalidates the task
+        version and current personnel facts, then atomically reserves the
+        personnel, creates the Assignment, updates candidates and task status,
+        records history and audit, and appends task.assigned.v1 to the Outbox.
+      operationId: confirmTaskCandidate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Actor-Type
+          in: header
+          required: true
+          schema: {type: string, enum: [human]}
+        - name: X-Actor-Public-ID
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Actor-Roles
+          in: header
+          required: true
+          schema: {type: string, example: leader}
+        - name: X-Actor-Team-IDs
+          in: header
+          required: false
+          schema: {type: string, example: "20"}
+        - name: X-Actor-Area-IDs
+          in: header
+          required: false
+          schema: {type: string, example: "10"}
+        - name: X-Actor-Global
+          in: header
+          required: false
+          schema: {type: boolean}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskConfirmationRequest'
+      responses:
+        '200':
+          description: Confirmation result or idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskConfirmationResponse'
+        '400':
+          description: Invalid command
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Principal is not allowed to assign in the task scope
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Task or candidate not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Stale version, already assigned, ineligible candidate, or idempotency conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/tasks/{taskPublicID}/cancel:
+    post:
+      summary: Cancel a non-terminal task
+      description: >
+        A human manager or admin may cancel a task in scope. A leader may
+        cancel only before the assigned employee accepts it. Core atomically
+        invalidates proposed candidates or releases the assignment and
+        personnel occupancy, records histories and audit, and appends
+        task.cancelled.v1 to the Outbox. Replaying cancellation_id is
+        idempotent.
+      operationId: cancelTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskPublicID
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Actor-Type
+          in: header
+          required: true
+          schema: {type: string, enum: [human]}
+        - name: X-Actor-Public-ID
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Actor-Roles
+          in: header
+          required: true
+          schema: {type: string, example: manager}
+        - name: X-Actor-Team-IDs
+          in: header
+          required: false
+          schema: {type: string, example: "20"}
+        - name: X-Actor-Area-IDs
+          in: header
+          required: false
+          schema: {type: string, example: "10"}
+        - name: X-Actor-Global
+          in: header
+          required: false
+          schema: {type: boolean}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCancellationRequest'
+      responses:
+        '200':
+          description: Cancellation result or idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCancellationResponse'
+        '400':
+          description: Invalid command
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Principal is not allowed to cancel in the task scope
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Stale version, invalid state, or idempotency conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /api/v1/task-change-requests:
+    get:
+      summary: List task change requests in the current management scope
+      description: Requests are paginated and are read-only until a manager or admin reviews them.
+      operationId: listTaskChangeRequests
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {name: task_public_id, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {type: string, enum: [pending, approved, rejected, applied, failed]}}
+      responses:
+        '200':
+          description: Paginated task change requests
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskChangeRequestListResponse'}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks task change management permission or scope}
+    post:
+      summary: Submit a task change request
+      description: A staff member may report an operational conflict, but the task changes only after manager or admin approval.
+      operationId: createTaskChangeRequest
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TaskChangeRequestCreate'}
+      responses:
+        '201':
+          description: Change request created in pending state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskChangeRequestResponse'}
+        '400': {description: Invalid task change request}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal is not allowed to submit a change request in the task scope}
+        '404': {description: Task or exception not found in the current scope}
+  /api/v1/task-change-requests/{publicID}/review:
+    patch:
+      summary: Approve or reject a task change request
+      description: Only a duty manager or system admin can apply a change. Approval and task mutation are one Core transaction.
+      operationId: reviewTaskChangeRequest
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/PublicID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TaskChangeRequestReview'}
+      responses:
+        '200':
+          description: Review result or idempotent replay
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskChangeRequestResponse'}
+        '400': {description: Invalid review request}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Only manager or admin can review task changes}
+        '404': {description: Change request not found}
+        '409': {description: Task state or candidate conflict while applying the approved change}
+
+  /internal/integration/v1/flight-source/sync:
+    post:
+      summary: Stage a normalized upstream flight batch
+      description: Idempotently stores schedule and lifecycle records in the Core flight source inbox. The Worker applies them to flight facts asynchronously.
+      x-internal: true
+      security: [{flightSourceKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FlightSourceSyncRequest'}
+      responses:
+        '202':
+          description: Batch accepted into the durable source inbox
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FlightSourceSyncResponse'}
+        '400': {description: Invalid or unsupported source record}
+        '401': {description: Invalid flight source key}
+        '503': {description: Durable source inbox is temporarily unavailable}
+  /internal/integration/v1/flight-source/health:
+    get:
+      summary: Read external flight source freshness and fallback state
+      description: The worker records attempts and failures; Core can continue using the pre-synced database facts when the provider is unavailable.
+      operationId: getFlightSourceHealth
+      x-internal: true
+      security: [{flightSourceKey: []}]
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          schema: {type: string, minLength: 2, maxLength: 64}
+      responses:
+        '200':
+          description: Current source health
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FlightSourceHealthResponse'}
+        '400': {description: Invalid provider}
+        '401': {description: Invalid flight source key}
+        '503': {description: Flight source health is temporarily unavailable}
+  /internal/integration/v1/flight-source/reconciliation:
+    get:
+      summary: Read the latest flight source reconciliation report
+      description: Compares the latest upstream schedule window with Core flight facts. Records still waiting in the durable source inbox are reported as pending instead of a mismatch.
+      operationId: getFlightSourceReconciliation
+      x-internal: true
+      security: [{flightSourceKey: []}]
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          schema: {type: string, minLength: 2, maxLength: 64}
+      responses:
+        '200':
+          description: Latest reconciliation report
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FlightSourceReconciliationResponse'}
+        '400': {description: Invalid provider}
+        '401': {description: Invalid flight source key}
+        '404': {description: No reconciliation report has been recorded}
+        '503': {description: Flight source reconciliation is temporarily unavailable}
+  /api/v1/positions:
+    get:
+      summary: List job position dictionary entries
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/IncludeDisabled'}
+      responses:
+        '200':
+          description: Paginated position dictionary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PositionListResponse'}
+    post:
+      summary: Create a job position dictionary entry
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PositionCreateRequest'}
+      responses:
+        '201':
+          description: Position created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PositionResponse'}
+        '409': {description: Position code already exists}
+  /api/v1/positions/{publicID}:
+    patch:
+      summary: Update a job position label or enabled state
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/PublicID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DictionaryPatchRequest'}
+      responses:
+        '200':
+          description: Position updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PositionResponse'}
+    delete:
+      summary: Disable a job position dictionary entry
+      description: Soft-deletes the entry so historical personnel and task-template references remain valid.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/PublicID'}
+      responses:
+        '204': {description: Position disabled}
+        '404': {description: Position not found}
+  /api/v1/capabilities:
+    get:
+      summary: List capability dictionary entries
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/IncludeDisabled'}
+      responses:
+        '200':
+          description: Paginated capability dictionary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CapabilityListResponse'}
+    post:
+      summary: Create a capability dictionary entry
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CapabilityCreateRequest'}
+      responses:
+        '201':
+          description: Capability created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CapabilityResponse'}
+        '409': {description: Capability code already exists}
+  /api/v1/capabilities/{publicID}:
+    patch:
+      summary: Update a capability label or enabled state
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/PublicID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DictionaryPatchRequest'}
+      responses:
+        '200':
+          description: Capability updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CapabilityResponse'}
+    delete:
+      summary: Disable a capability dictionary entry
+      description: Soft-deletes the entry so historical personnel and task-template references remain valid.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/PublicID'}
+      responses:
+        '204': {description: Capability disabled}
+        '404': {description: Capability not found}
+  /api/v1/personnel/status:
+    get:
+      summary: List current personnel work states
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {name: work_state, in: query, schema: {type: string}}
+        - {name: team_public_id, in: query, schema: {type: string, format: uuid}}
+        - {name: area_public_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Paginated personnel status
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PersonnelStatusListResponse'}
+  /api/v1/personnel/{publicID}/status-history:
+    get:
+      summary: List one personnel status history
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/PublicID'}
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+      responses:
+        '200':
+          description: Paginated status history
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusHistoryListResponse'}
+  /api/v1/events:
+    get:
+      summary: List operational events and delivery state
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {name: event_type, in: query, schema: {type: string}}
+        - {name: status, in: query, schema: {type: string}}
+        - {name: flight_public_id, in: query, schema: {type: string, format: uuid}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+      responses:
+        '200':
+          description: Paginated event stream read model
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventListResponse'}
+  /api/v1/realtime/management:
+    get:
+      summary: Subscribe to scoped management state change hints
+      description: Short-lived SSE stream for managers, leaders and supervisors. Last-Event-ID or after_id resumes from a durable Core outbox cursor; clients must re-query paginated facts after reconnecting.
+      operationId: subscribeManagementRealtime
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          schema: {type: integer, format: int64, minimum: 0}
+        - name: after_id
+          in: query
+          schema: {type: integer, format: int64, minimum: 0}
+        - name: wait_seconds
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 60, default: 60}
+      responses:
+        '200':
+          description: Server-sent management event stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '401': {description: Missing or invalid JWT}
+        '403': {description: Principal lacks event read permission or scope}
+        '503': {description: Management realtime stream is unavailable}
+  /api/v1/audit:
+    get:
+      summary: List redacted audit records
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {name: actor_id, in: query, schema: {type: string}}
+        - {name: action, in: query, schema: {type: string}}
+        - {name: resource_type, in: query, schema: {type: string}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+      responses:
+        '200':
+          description: Paginated audit records
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuditListResponse'}
+  /api/v1/scopes:
+    get:
+      summary: Return the current Core-derived scope
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Principal roles and scope
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScopeResponse'}
+  /api/v1/diagnostics:
+    get:
+      summary: Return safe Core runtime and synchronization diagnostics
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Diagnostics without credentials or raw payloads
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DiagnosticsResponse'}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    flightSourceKey:
+      type: apiKey
+      in: header
+      name: X-Flight-Source-Key
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 1, default: 1}
+    PageSize:
+      name: page_size
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    IncludeDisabled:
+      name: include_disabled
+      in: query
+      schema: {type: boolean, default: false}
+    PublicID:
+      name: publicID
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  schemas:
+    ManagementResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {type: object}
+        request_id: {type: string}
+        trace_id: {type: string}
+    ManagementListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {type: object}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    AdminIdentityResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/AdminIdentity'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    AdminIdentityListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/AdminIdentity'}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    AdminIdentity:
+      type: object
+      required: [public_id, provider, external_subject, display_name, role, enabled, global_scope, area_ids, team_ids, area_public_ids, team_public_ids, user_id]
+      properties:
+        public_id: {type: string, format: uuid}
+        provider: {type: string, enum: [wecom, oidc, development]}
+        external_subject: {type: string}
+        display_name: {type: string}
+        role: {type: string, enum: [admin, manager, leader, supervisor]}
+        enabled: {type: boolean}
+        global_scope: {type: boolean}
+        area_ids: {type: array, items: {type: integer, format: int64}}
+        team_ids: {type: array, items: {type: integer, format: int64}}
+        area_public_ids: {type: array, items: {type: string, format: uuid}}
+        team_public_ids: {type: array, items: {type: string, format: uuid}}
+        user_id: {type: integer, format: int64}
+    AreaWriteRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code: {type: string, maxLength: 64}
+        name: {type: string, maxLength: 128}
+        enabled: {type: boolean, default: true}
+    AreaPatchRequest:
+      type: object
+      properties:
+        code: {type: string, maxLength: 64}
+        name: {type: string, maxLength: 128}
+        enabled: {type: boolean}
+    TeamWriteRequest:
+      type: object
+      required: [area_public_id, code, name]
+      properties:
+        area_public_id: {type: string, format: uuid}
+        code: {type: string, maxLength: 64}
+        name: {type: string, maxLength: 128}
+        enabled: {type: boolean, default: true}
+    TeamPatchRequest:
+      type: object
+      properties:
+        area_public_id: {type: string, format: uuid}
+        code: {type: string, maxLength: 64}
+        name: {type: string, maxLength: 128}
+        enabled: {type: boolean}
+    PersonnelWriteRequest:
+      type: object
+      required: [employee_no, display_name, team_public_id, position_code, capability_code, password]
+      properties:
+        employee_no: {type: string, pattern: '^[0-9]{4,12}$'}
+        display_name: {type: string, maxLength: 128}
+        team_public_id: {type: string, format: uuid}
+        position_code: {type: string, pattern: '^[a-z][a-z0-9_-]{1,63}$'}
+        capability_code: {type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}
+        capabilities: {type: array, minItems: 1, maxItems: 1, items: {type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}}
+        password: {type: string, format: password, minLength: 8, maxLength: 128}
+    PersonnelPatchRequest:
+      type: object
+      properties:
+        employee_no: {type: string, pattern: '^[0-9]{4,12}$'}
+        display_name: {type: string, maxLength: 128}
+        team_public_id: {type: string, format: uuid}
+        position_code: {type: string, pattern: '^[a-z][a-z0-9_-]{1,63}$'}
+        capability_code: {type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}
+        capabilities: {type: array, minItems: 1, maxItems: 1, items: {type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}}
+        enabled: {type: boolean}
+    PasswordResetRequest:
+      type: object
+      required: [password]
+      properties:
+        password: {type: string, format: password, minLength: 8, maxLength: 128}
+    TemplateWriteRequest:
+      type: object
+      required: [name, template_version, area_public_id, team_public_id, required_position_code, required_capability_code, default_message]
+      properties:
+        name: {type: string, maxLength: 255}
+        trigger_type: {type: string, enum: [flight_arrived], default: flight_arrived}
+        template_version: {type: integer, minimum: 1}
+        enabled: {type: boolean, default: true}
+        area_public_id: {type: string, format: uuid}
+        team_public_id: {type: string, format: uuid}
+        required_position_code: {type: string, pattern: '^[a-z][a-z0-9_-]{1,63}$'}
+        required_capability_code: {type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}
+        required_capabilities: {type: array, minItems: 1, maxItems: 1, items: {type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}}
+        planned_offset_seconds: {type: integer, minimum: 0}
+        default_message: {type: string}
+    TemplatePatchRequest:
+      type: object
+      properties:
+        name: {type: string, maxLength: 255}
+        enabled: {type: boolean}
+        area_public_id: {type: string, format: uuid}
+        team_public_id: {type: string, format: uuid}
+        required_position_code: {type: string, pattern: '^[a-z][a-z0-9_-]{1,63}$'}
+        required_capability_code: {type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}
+        required_capabilities: {type: array, minItems: 1, maxItems: 1, items: {type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}}
+        planned_offset_seconds: {type: integer, minimum: 0}
+        default_message: {type: string}
+    AdminIdentityWriteRequest:
+      type: object
+      required: [provider, external_subject, display_name, role]
+      properties:
+        provider: {type: string, enum: [wecom, oidc, development]}
+        external_subject: {type: string, maxLength: 255}
+        display_name: {type: string, maxLength: 128}
+        role: {type: string, enum: [admin, manager, leader, supervisor]}
+        enabled: {type: boolean, default: true}
+        global_scope: {type: boolean, default: true}
+        area_public_ids: {type: array, items: {type: string, format: uuid}}
+        team_public_ids: {type: array, items: {type: string, format: uuid}}
+        user_id: {type: integer, format: int64, minimum: 0}
+    AdminIdentityPatchRequest:
+      type: object
+      properties:
+        display_name: {type: string, maxLength: 128}
+        role: {type: string, enum: [admin, manager, leader, supervisor]}
+        enabled: {type: boolean}
+        global_scope: {type: boolean}
+        area_public_ids: {type: array, items: {type: string, format: uuid}}
+        team_public_ids: {type: array, items: {type: string, format: uuid}}
+        user_id: {type: integer, format: int64, minimum: 0}
+    AdminSSOExchangeRequest:
+      type: object
+      required: [state, code, redirect_uri]
+      properties:
+        state: {type: string, minLength: 16, maxLength: 256}
+        code: {type: string, format: password}
+        redirect_uri: {type: string, format: uri}
+    AdminPrincipal:
+      type: object
+      required: [public_id, type, role]
+      properties:
+        public_id: {type: string, format: uuid}
+        type: {type: string, enum: [human]}
+        role: {type: string, enum: [admin, manager, leader, supervisor]}
+    AdminSSOExchangeResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [state, access_token, token_type, expires_in, session_public_id, principal]
+          properties:
+            state: {type: string, enum: [authenticated]}
+            access_token: {type: string, format: password}
+            token_type: {type: string, enum: [Bearer]}
+            expires_in: {type: integer, format: int64}
+            session_public_id: {type: string, format: uuid}
+            principal: {$ref: '#/components/schemas/AdminPrincipal'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    AdminSessionResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [session_public_id, expires_at, principal]
+          properties:
+            session_public_id: {type: string, format: uuid}
+            expires_at: {type: string, format: date-time}
+            principal: {$ref: '#/components/schemas/AdminPrincipal'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    PersonnelListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/Personnel'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    Personnel:
+      type: object
+      required: [public_id, user_public_id, employee_no, display_name, area_public_id, team_public_id, position_code, capability_code, capabilities, work_state, status_version, last_state_changed_at, enabled]
+      properties:
+        public_id: {type: string, format: uuid}
+        user_public_id: {type: string, format: uuid}
+        employee_no: {type: string}
+        display_name: {type: string}
+        area_public_id: {type: string, format: uuid}
+        area_name: {type: string}
+        team_public_id: {type: string, format: uuid}
+        team_name: {type: string}
+        position_code: {type: string}
+        capability_code: {type: string}
+        capabilities: {type: array, items: {type: string}}
+        work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        last_state_changed_at: {type: string, format: date-time}
+        unavailable_reason: {type: string}
+        enabled: {type: boolean}
+    AssignmentListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/Assignment'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    Assignment:
+      type: object
+      required: [public_id, task_public_id, flight_public_id, flight_display_no, personnel_public_id, personnel_employee_no, personnel_name, area_public_id, team_public_id, status, status_version, confirmation_id, confirmed_by_public_id, confirmed_at, receipt_status, planned_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        task_public_id: {type: string, format: uuid}
+        flight_public_id: {type: string, format: uuid}
+        flight_display_no: {type: string}
+        personnel_public_id: {type: string, format: uuid}
+        personnel_employee_no: {type: string}
+        personnel_name: {type: string}
+        area_public_id: {type: string, format: uuid}
+        team_public_id: {type: string, format: uuid}
+        status: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        confirmation_id: {type: string}
+        confirmed_by_public_id: {type: string, format: uuid}
+        confirmed_at: {type: string, format: date-time}
+        receipt_status: {type: string, enum: [pending, received]}
+        received_at: {type: string, format: date-time}
+        accepted_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+        cancelled_at: {type: string, format: date-time}
+        cancel_reason: {type: string}
+        planned_at: {type: string, format: date-time}
+    PasswordVerifyRequest:
+      type: object
+      required: [employee_no, password, client]
+      properties:
+        employee_no: {type: string}
+        password: {type: string, format: password}
+        client: {type: string, enum: [employee-miniapp, employee-wecom-miniapp, employee-web]}
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_app: {type: string}
+    PasswordVerifyResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [state, staff]
+          properties:
+            state: {type: string, enum: [authenticated, binding_required]}
+            binding_ticket: {type: string, format: uuid}
+            staff: {$ref: '#/components/schemas/StaffIdentity'}
+    ProviderExchangeRequest:
+      type: object
+      required: [provider, provider_code, client]
+      properties:
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_code: {type: string, format: password}
+        client: {type: string, enum: [employee-miniapp, employee-wecom-miniapp, employee-web]}
+        redirect_uri: {type: string, format: uri}
+    BindingCompleteRequest:
+      type: object
+      required: [binding_ticket, provider, provider_code, client]
+      properties:
+        binding_ticket: {type: string, format: uuid}
+        provider: {type: string, enum: [personal_wechat, wecom]}
+        provider_code: {type: string, format: password}
+        client: {type: string, enum: [employee-miniapp, employee-wecom-miniapp, employee-web]}
+        redirect_uri: {type: string, format: uri}
+    StaffIdentity:
+      type: object
+      required: [public_id, employee_no, display_name, role]
+      properties:
+        public_id: {type: string, format: uuid}
+        employee_no: {type: string}
+        display_name: {type: string}
+        role: {type: string}
+    FlightArrivalRequest:
+      type: object
+      required: [occurred_at, actual_arrival_at, source]
+      properties:
+        source_event_id:
+          type: string
+          maxLength: 128
+          description: Stable upstream event ID used as the idempotency key.
+        occurred_at:
+          type: string
+          format: date-time
+        actual_arrival_at:
+          type: string
+          format: date-time
+        source:
+          type: string
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9_.-]{1,63}$'
+          description: Upstream provider name; the value manual and browser input are rejected.
+    FlightArrivalResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          $ref: '#/components/schemas/FlightArrivalResult'
+        request_id: {type: string}
+        trace_id: {type: string}
+    FlightArrivalResult:
+      type: object
+      required: [result_code, duplicate, flight_public_id, flight_status, candidate_count]
+      properties:
+        result_code:
+          type: string
+          enum: [created, candidate_shortage, no_active_template, already_processed]
+        duplicate: {type: boolean}
+        flight_public_id: {type: string, format: uuid}
+        flight_status: {type: string, enum: [scheduled, arrived, departed, cancelled]}
+        task_public_id: {type: string, format: uuid}
+        task_status: {type: string, enum: [pending_dispatch, awaiting_confirmation, assigned, in_progress, completed, cancelled, paused]}
+        generation_key: {type: string}
+        candidate_count: {type: integer, minimum: 0}
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskCandidate'
+    TaskCandidate:
+      type: object
+      required: [public_id, personnel_public_id, rank, position_code, capabilities, work_state]
+      properties:
+        public_id: {type: string, format: uuid}
+        personnel_public_id: {type: string, format: uuid}
+        rank: {type: integer, minimum: 1}
+        position_code: {type: string}
+        capabilities:
+          type: array
+          items: {type: string}
+        work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+    TaskListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/TaskView'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskHistoryResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [task_public_id, current_status, current_status_version, events]
+          properties:
+            task_public_id: {type: string, format: uuid}
+            current_status: {type: string, enum: [pending_dispatch, awaiting_confirmation, assigned, in_progress, completed, cancelled, paused]}
+            current_status_version: {type: integer, format: int64, minimum: 0}
+            events:
+              type: array
+              items: {$ref: '#/components/schemas/TaskHistoryEvent'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskHistoryEvent:
+      type: object
+      required: [public_id, kind, status_version, to_status, actor_type, occurred_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        kind: {type: string, enum: [task, assignment, personnel]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        from_status: {type: string}
+        to_status: {type: string}
+        reason: {type: string}
+        actor_type: {type: string}
+        actor_public_id: {type: string, format: uuid}
+        command_id: {type: string}
+        source_event_id: {type: string}
+        assignment_public_id: {type: string, format: uuid}
+        personnel_public_id: {type: string, format: uuid}
+        occurred_at: {type: string, format: date-time}
+    ExceptionListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/TaskException'}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskException:
+      type: object
+      required: [public_id, task_public_id, flight_public_id, flight_display_no, assignment_public_id, personnel_public_id, personnel_name, area_public_id, team_public_id, category, severity, description, status, reported_by_public_id, reported_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        task_public_id: {type: string, format: uuid}
+        flight_public_id: {type: string, format: uuid}
+        flight_display_no: {type: string}
+        assignment_public_id: {type: string, format: uuid}
+        personnel_public_id: {type: string, format: uuid}
+        personnel_name: {type: string}
+        area_public_id: {type: string, format: uuid}
+        team_public_id: {type: string, format: uuid}
+        category: {type: string}
+        severity: {type: string, enum: [low, medium, high, critical]}
+        description: {type: string}
+        status: {type: string, enum: [open, acknowledged, resolved, rejected]}
+        reported_by_public_id: {type: string, format: uuid}
+        reported_at: {type: string, format: date-time}
+        resolved_by_public_id: {type: string, format: uuid}
+        resolved_at: {type: string, format: date-time}
+        resolution_note: {type: string}
+    ExceptionUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [acknowledged, resolved, rejected]}
+        resolution_note: {type: string, maxLength: 1024}
+    ExceptionUpdateResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [public_id, status]
+          properties:
+            public_id: {type: string, format: uuid}
+            status: {type: string, enum: [acknowledged, resolved, rejected]}
+        request_id: {type: string}
+        trace_id: {type: string}
+    ReportOverviewResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [task_counts, flight_counts, assignment_counts, personnel_counts, exception_counts]
+          properties:
+            from: {type: string, format: date}
+            to: {type: string, format: date}
+            task_counts: {type: object, additionalProperties: {type: integer, format: int64, minimum: 0}}
+            flight_counts: {type: object, additionalProperties: {type: integer, format: int64, minimum: 0}}
+            assignment_counts: {type: object, additionalProperties: {type: integer, format: int64, minimum: 0}}
+            personnel_counts: {type: object, additionalProperties: {type: integer, format: int64, minimum: 0}}
+            exception_counts: {type: object, additionalProperties: {type: integer, format: int64, minimum: 0}}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskDetailResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/TaskView'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskView:
+      type: object
+      required: [public_id, flight_public_id, template_public_id, area_public_id, team_public_id, status, status_version, sync_version, candidates]
+      properties:
+        public_id: {type: string, format: uuid}
+        flight_public_id: {type: string, format: uuid}
+        flight_display_no: {type: string}
+        template_public_id: {type: string, format: uuid}
+        area_public_id: {type: string, format: uuid}
+        team_public_id: {type: string, format: uuid}
+        trigger_type: {type: string}
+        generation_key: {type: string}
+        source_event_id: {type: string}
+        template_version: {type: integer, minimum: 1}
+        required_position_code: {type: string}
+        required_capabilities:
+          type: array
+          items: {type: string}
+        name: {type: string}
+        message: {type: string}
+        planned_at: {type: string, format: date-time}
+        status: {type: string, enum: [pending_dispatch, awaiting_confirmation, assigned, in_progress, completed, cancelled, paused]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        sync_version: {type: integer, format: int64, minimum: 0}
+        candidates:
+          type: array
+          items: {$ref: '#/components/schemas/TaskCandidateDetail'}
+        assignment:
+          $ref: '#/components/schemas/TaskAssignmentDetail'
+    TaskCandidateDetail:
+      allOf:
+        - $ref: '#/components/schemas/TaskCandidate'
+        - type: object
+          properties:
+            status: {type: string, enum: [proposed, selected, rejected, invalidated]}
+            matched_position_code: {type: string}
+            matched_capabilities:
+              type: array
+              items: {type: string}
+            personnel_work_state_snapshot: {type: string}
+            personnel_state_changed_at: {type: string, format: date-time}
+            rejection_reason: {type: string}
+            selected_at: {type: string, format: date-time}
+            invalidated_at: {type: string, format: date-time}
+    TaskAssignmentDetail:
+      type: object
+      required: [public_id, candidate_public_id, personnel_public_id, status, status_version, confirmation_id, confirmed_by_public_id, confirmed_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        candidate_public_id: {type: string, format: uuid}
+        personnel_public_id: {type: string, format: uuid}
+        status: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        confirmation_id: {type: string}
+        confirmed_by_public_id: {type: string, format: uuid}
+        confirmed_at: {type: string, format: date-time}
+    ErrorResponse:
+      type: object
+      required: [code, message, request_id, trace_id]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskConfirmationRequest:
+      type: object
+      required: [candidate_public_id, confirmation_id, expected_task_version]
+      properties:
+        candidate_public_id: {type: string, format: uuid}
+        confirmation_id: {type: string, maxLength: 128}
+        expected_task_version: {type: integer, format: int64, minimum: 0}
+    TaskConfirmationResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          $ref: '#/components/schemas/TaskConfirmationResult'
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskConfirmationResult:
+      type: object
+      required: [result_code, duplicate, task_public_id, candidate_public_id, task_version, sync_version]
+      properties:
+        result_code:
+          type: string
+          enum: [assigned, task_already_assigned, candidate_no_longer_eligible, forbidden, confirmation_id_conflict, stale_task_version, invalid_state, task_not_found, candidate_not_found]
+        duplicate: {type: boolean}
+        task_public_id: {type: string, format: uuid}
+        task_status: {type: string, enum: [pending_dispatch, awaiting_confirmation, assigned, in_progress, completed, cancelled, paused]}
+        task_version: {type: integer, format: int64, minimum: 0}
+        candidate_public_id: {type: string, format: uuid}
+        assignment_public_id: {type: string, format: uuid}
+        assignment_status: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        personnel_public_id: {type: string, format: uuid}
+        personnel_work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+        sync_version: {type: integer, format: int64, minimum: 0}
+    TaskCancellationRequest:
+      type: object
+      required: [cancellation_id, expected_task_version, reason]
+      properties:
+        cancellation_id: {type: string, maxLength: 128}
+        expected_task_version: {type: integer, format: int64, minimum: 0}
+        reason: {type: string, maxLength: 255}
+    TaskCancellationResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          $ref: '#/components/schemas/TaskCancellationResult'
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskCancellationResult:
+      type: object
+      required: [result_code, duplicate, task_public_id, task_version, sync_version]
+      properties:
+        result_code:
+          type: string
+          enum: [cancelled, already_cancelled, already_completed, forbidden, cancellation_id_conflict, stale_task_version, invalid_state, task_not_found]
+        duplicate: {type: boolean}
+        task_public_id: {type: string, format: uuid}
+        task_status: {type: string, enum: [pending_dispatch, awaiting_confirmation, assigned, in_progress, completed, cancelled, paused]}
+        task_version: {type: integer, format: int64, minimum: 0}
+        assignment_public_id: {type: string, format: uuid}
+        assignment_status: {type: string, enum: [confirmed, accepted, completed, cancelled]}
+        personnel_public_id: {type: string, format: uuid}
+        personnel_work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+        reason: {type: string}
+        sync_version: {type: integer, format: int64, minimum: 0}
+    DictionaryCreateRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code: {type: string, minLength: 2, maxLength: 64, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}
+        name: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string, maxLength: 255}
+        enabled: {type: boolean, default: true}
+    PositionCreateRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code: {type: string, minLength: 2, maxLength: 64, pattern: '^[a-z][a-z0-9_-]{1,63}$'}
+        name: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string, maxLength: 255}
+        enabled: {type: boolean, default: true}
+    CapabilityCreateRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code: {type: string, minLength: 2, maxLength: 64, pattern: '^[a-z][a-z0-9_.-]{1,63}$'}
+        name: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string, maxLength: 255}
+        enabled: {type: boolean, default: true}
+    DictionaryPatchRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string, maxLength: 255}
+        enabled: {type: boolean}
+    Position:
+      type: object
+      required: [public_id, code, name, description, enabled]
+      properties:
+        public_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        description: {type: string}
+        enabled: {type: boolean}
+    Capability:
+      type: object
+      required: [public_id, code, name, description, enabled]
+      properties:
+        public_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        description: {type: string}
+        enabled: {type: boolean}
+    PositionResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/Position'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    CapabilityResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/Capability'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    PositionListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/Position'}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    CapabilityListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/Capability'}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    PersonnelStatus:
+      type: object
+      required: [public_id, employee_no, display_name, area_public_id, area_name, team_public_id, team_name, position_code, capability_code, work_state, status_version, last_state_changed_at, enabled]
+      properties:
+        public_id: {type: string, format: uuid}
+        employee_no: {type: string}
+        display_name: {type: string}
+        area_public_id: {type: string, format: uuid}
+        area_name: {type: string}
+        team_public_id: {type: string, format: uuid}
+        team_name: {type: string}
+        position_code: {type: string}
+        capability_code: {type: string}
+        work_state: {type: string, enum: [idle, reserved, busy, unavailable]}
+        status_version: {type: integer, format: int64, minimum: 0}
+        last_state_changed_at: {type: string, format: date-time}
+        unavailable_reason: {type: string}
+        enabled: {type: boolean}
+    StatusHistory:
+      type: object
+      required: [public_id, personnel_public_id, status_version, to_state, actor_type, occurred_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        personnel_public_id: {type: string, format: uuid}
+        status_version: {type: integer, format: int64, minimum: 0}
+        from_state: {type: string}
+        to_state: {type: string}
+        reason: {type: string}
+        actor_type: {type: string}
+        actor_public_id: {type: string, format: uuid}
+        assignment_id: {type: integer, format: int64}
+        command_id: {type: string}
+        occurred_at: {type: string, format: date-time}
+    Event:
+      type: object
+      required: [public_id, event_type, status, aggregate_type, aggregate_public_id, source, occurred_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        event_type: {type: string}
+        status: {type: string}
+        aggregate_type: {type: string}
+        aggregate_public_id: {type: string, format: uuid}
+        flight_public_id: {type: string, format: uuid}
+        flight_display_no: {type: string}
+        source: {type: string}
+        occurred_at: {type: string, format: date-time}
+        last_error: {type: string}
+    AuditEntry:
+      type: object
+      required: [id, actor_type, actor_id, action, resource_type, resource_id, result, request_id, trace_id, source_ip, occurred_at]
+      properties:
+        id: {type: integer, format: int64}
+        actor_type: {type: string}
+        actor_id: {type: string}
+        action: {type: string}
+        resource_type: {type: string}
+        resource_id: {type: string}
+        result: {type: string}
+        request_id: {type: string}
+        trace_id: {type: string}
+        source_ip: {type: string}
+        occurred_at: {type: string, format: date-time}
+    PersonnelStatusListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/PersonnelStatus'}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    StatusHistoryListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/StatusHistory'}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    EventListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/Event'}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    AuditListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/AuditEntry'}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    ScopeResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [principal_public_id, roles, global, area_ids, team_ids]
+          properties:
+            principal_public_id: {type: string, format: uuid}
+            roles: {type: array, items: {type: string}}
+            global: {type: boolean}
+            area_ids: {type: array, items: {type: integer, format: int64}}
+            team_ids: {type: array, items: {type: integer, format: int64}}
+        request_id: {type: string}
+        trace_id: {type: string}
+    DiagnosticsResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [component, generated_at, database_reachable, runtime, sync]
+          properties:
+            component: {type: string}
+            generated_at: {type: string, format: date-time}
+            database_reachable: {type: boolean}
+            runtime:
+              type: object
+              required: [environment, redis_enabled, flight_source_configured, real_identity_provider, development_actor_headers]
+              properties:
+                environment: {type: string}
+                redis_enabled: {type: boolean}
+                flight_source_configured: {type: boolean}
+                real_identity_provider: {type: boolean}
+                development_actor_headers: {type: boolean}
+            sync:
+              type: object
+              required: [flight_source_pending, flight_source_retry, flight_source_failed, outbox_pending, outbox_failed, core_inbox_failed]
+              properties:
+                flight_source_pending: {type: integer, format: int64, minimum: 0}
+                flight_source_retry: {type: integer, format: int64, minimum: 0}
+                flight_source_failed: {type: integer, format: int64, minimum: 0}
+                outbox_pending: {type: integer, format: int64, minimum: 0}
+                outbox_failed: {type: integer, format: int64, minimum: 0}
+                core_inbox_failed: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    FlightSourceSyncRequest:
+      type: object
+      required: [provider]
+      properties:
+        provider: {type: string, minLength: 2, maxLength: 64}
+        schedules:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [external_flight_id, flight_display_no, operating_date, scheduled_at]
+            properties:
+              external_flight_id: {type: string, maxLength: 128}
+              flight_display_no: {type: string, maxLength: 64}
+              operating_date: {type: string, format: date-time}
+              scheduled_at: {type: string, format: date-time}
+        events:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [external_event_id, external_flight_id, status, occurred_at]
+            properties:
+              external_event_id: {type: string, maxLength: 128}
+              external_flight_id: {type: string, maxLength: 128}
+              status: {type: string, enum: [arrived, departed, cancelled, delayed]}
+              occurred_at: {type: string, format: date-time}
+              actual_arrival_at: {type: string, format: date-time}
+              actual_departure_at: {type: string, format: date-time}
+              scheduled_at: {type: string, format: date-time}
+              reason: {type: string, maxLength: 255}
+    FlightSourceSyncResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [status, accepted, updated, duplicate]
+          properties:
+            status: {type: string, enum: [staged]}
+            accepted: {type: integer, minimum: 0}
+            updated: {type: integer, minimum: 0}
+            duplicate: {type: integer, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskChangeRequestCreate:
+      type: object
+      required: [task_public_id, action, reason]
+      properties:
+        task_public_id: {type: string, format: uuid}
+        exception_public_id: {type: string, format: uuid}
+        action: {type: string, enum: [pause, reassign, reschedule, cancel, resume]}
+        reason: {type: string, minLength: 1, maxLength: 1024}
+        target_candidate_public_id: {type: string, format: uuid}
+        target_planned_at: {type: string, format: date-time}
+        request_id: {type: string, maxLength: 128}
+    TaskChangeRequestReview:
+      type: object
+      required: [decision]
+      properties:
+        decision: {type: string, enum: [approve, reject]}
+        review_note: {type: string, maxLength: 1024}
+    TaskChangeRequest:
+      type: object
+      required: [public_id, task_public_id, action, reason, status, requested_by_public_id, requested_at, request_id, trace_id]
+      properties:
+        public_id: {type: string, format: uuid}
+        task_public_id: {type: string, format: uuid}
+        exception_public_id: {type: string, format: uuid}
+        action: {type: string, enum: [pause, reassign, reschedule, cancel, resume]}
+        reason: {type: string}
+        target_candidate_public_id: {type: string, format: uuid}
+        target_planned_at: {type: string, format: date-time}
+        status: {type: string, enum: [pending, approved, rejected, applied, failed]}
+        requested_by_public_id: {type: string, format: uuid}
+        requested_at: {type: string, format: date-time}
+        reviewed_by_public_id: {type: string, format: uuid}
+        reviewed_at: {type: string, format: date-time}
+        review_note: {type: string}
+        applied_at: {type: string, format: date-time}
+        failure_reason: {type: string}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskChangeRequestResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/TaskChangeRequest'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    TaskChangeRequestListResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data:
+          type: object
+          required: [items, page, page_size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/TaskChangeRequest'}}
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, format: int64, minimum: 0}
+        request_id: {type: string}
+        trace_id: {type: string}
+    FlightSourceHealth:
+      type: object
+      required: [provider, state, fallback_enabled]
+      properties:
+        provider: {type: string}
+        state: {type: string, enum: [fresh, stale, fallback, failed]}
+        last_attempt_at: {type: string, format: date-time}
+        last_success_at: {type: string, format: date-time}
+        last_failure_at: {type: string, format: date-time}
+        last_error: {type: string}
+        fallback_enabled: {type: boolean}
+        last_reconciliation_at: {type: string, format: date-time}
+        last_reconciliation_status: {type: string, enum: [matched, pending, mismatch]}
+        last_reconciliation_mismatch_count: {type: integer, minimum: 0}
+    FlightSourceHealthResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/FlightSourceHealth'}
+        request_id: {type: string}
+        trace_id: {type: string}
+    FlightSourceReconciliation:
+      type: object
+      required: [public_id, provider, window_from, window_to, upstream_count, core_count, pending_apply_count, upstream_missing_count, core_missing_count, status, checked_at]
+      properties:
+        public_id: {type: string, format: uuid}
+        provider: {type: string}
+        window_from: {type: string, format: date-time}
+        window_to: {type: string, format: date-time}
+        upstream_count: {type: integer, minimum: 0}
+        core_count: {type: integer, minimum: 0}
+        pending_apply_count: {type: integer, minimum: 0}
+        upstream_missing_count: {type: integer, minimum: 0}
+        core_missing_count: {type: integer, minimum: 0}
+        upstream_missing_ids: {type: array, items: {type: string}}
+        core_missing_ids: {type: array, items: {type: string}}
+        pending_apply_ids: {type: array, items: {type: string}}
+        status: {type: string, enum: [matched, pending, mismatch]}
+        checked_at: {type: string, format: date-time}
+    FlightSourceReconciliationResponse:
+      type: object
+      required: [data, request_id, trace_id]
+      properties:
+        data: {$ref: '#/components/schemas/FlightSourceReconciliation'}
+        request_id: {type: string}
+        trace_id: {type: string}

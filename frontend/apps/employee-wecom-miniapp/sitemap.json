@@ -1,0 +1,4 @@
+{
+  "desc": "企业微信员工端页面索引",
+  "rules": [{ "action": "allow", "page": "*" }]
+}

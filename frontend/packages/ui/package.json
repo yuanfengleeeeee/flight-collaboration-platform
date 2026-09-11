@@ -1,0 +1,8 @@
+{
+  "name": "@flight/ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": { "@flight/contracts": "workspace:*", "@flight/task-domain": "workspace:*", "react": "^18.3.1" },
+  "exports": { ".": { "types": "./src/index.tsx", "import": "./src/index.tsx" } }
+}

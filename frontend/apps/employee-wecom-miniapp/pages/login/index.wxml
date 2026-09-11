@@ -1,0 +1,15 @@
+<view class="page-shell login-page">
+  <view class="eyebrow">WECOM / EMPLOYEE</view>
+  <view class="title">企业微信工作台</view>
+  <view class="muted">这是项目自有员工账号入口。首次使用用项目员工工号和密码完成绑定，之后可直接使用企业微信登录。</view>
+
+  <view class="card">
+    <button class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="quickLogin">{{loading ? '正在验证…' : '企业微信快捷登录'}}</button>
+    <view class="divider">首次绑定 / 恢复登录</view>
+    <input class="input" type="text" value="{{employeeNo}}" data-field="employeeNo" bindinput="inputValue" placeholder="项目员工工号" />
+    <input class="input" password value="{{password}}" data-field="password" bindinput="inputValue" placeholder="项目员工密码" />
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <button class="button secondary" loading="{{passwordLoading}}" disabled="{{passwordLoading}}" bindtap="passwordLogin">工号密码登录并绑定</button>
+    <button class="button secondary" loading="{{passwordLoading}}" disabled="{{passwordLoading}}" bindtap="passwordOnlyLogin">仅使用工号密码登录</button>
+  </view>
+</view>

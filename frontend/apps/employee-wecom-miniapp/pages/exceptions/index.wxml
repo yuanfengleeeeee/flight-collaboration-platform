@@ -1,0 +1,19 @@
+<view class="page-shell task-page">
+  <view class="eyebrow">WECOM / EXCEPTIONS</view>
+  <view class="title">异常反馈</view>
+  <view class="muted">异常通过持久化 Command 送达 Core，由 Core 校验任务归属和版本。</view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{notice}}" class="card muted">{{notice}}</view>
+  <view wx:if="{{loading}}" class="card muted">正在读取任务…</view>
+  <view wx:if="{{!loading && tasks.length === 0}}" class="card muted">当前没有可反馈任务</view>
+  <view wx:if="{{!loading && tasks.length > 0}}" class="card exception-form">
+    <picker mode="selector" range="{{tasks}}" range-key="task_name" value="{{taskIndex}}" bindchange="chooseTask"><view class="form-row">关联任务：{{tasks[taskIndex].task_name}}</view></picker>
+    <picker mode="selector" range="{{categoryOptions}}" value="{{categoryIndex}}" bindchange="chooseCategory"><view class="form-row">异常类别：{{category}}</view></picker>
+    <picker mode="selector" range="{{changeActionOptions}}" value="{{changeActionIndex}}" bindchange="chooseChangeAction"><view class="form-row">申请动作：{{changeActionOptions[changeActionIndex]}}</view></picker>
+    <input wx:if="{{changeAction === 'reschedule'}}" class="input" value="{{targetPlannedAt}}" bindinput="inputTargetPlannedAt" placeholder="建议时间，例如 2026-09-07T14:30:00+08:00" />
+    <picker mode="selector" range="{{['low', 'medium', 'high', 'critical']}}" bindchange="chooseSeverity"><view class="form-row">严重程度：{{severity}}</view></picker>
+    <textarea class="input exception-textarea" value="{{description}}" maxlength="1024" bindinput="inputDescription" placeholder="描述现场异常、影响范围和需要的协助" />
+    <button class="button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submit">提交受控申请</button>
+  </view>
+  <view class="bottom-nav"><navigator class="bottom-nav__item" url="/pages/tasks/index">任务</navigator><navigator class="bottom-nav__item" url="/pages/notifications/index">通知</navigator><navigator class="bottom-nav__item" url="/pages/history/index">历史</navigator><navigator class="bottom-nav__item active" url="/pages/exceptions/index">异常</navigator><navigator class="bottom-nav__item" url="/pages/account/index">账号</navigator></view>
+</view>

@@ -1,0 +1,9 @@
+ALTER TABLE mobile_session
+    DROP INDEX idx_mobile_session_actor_active,
+    DROP INDEX uk_mobile_session_refresh_token_hash,
+    DROP COLUMN replaced_by_session_public_id,
+    DROP COLUMN revoked_at,
+    DROP COLUMN last_seen_at,
+    DROP COLUMN absolute_expires_at,
+    DROP COLUMN refresh_token_hash,
+    DROP COLUMN client;

@@ -19,6 +19,7 @@ func Logger() gin.HandlerFunc {
 
 		cost := time.Since(start)
 		common.L().Info("请求",
+			zap.String("request_id", c.GetString("request_id")),
 			zap.String("method", c.Request.Method),
 			zap.String("path", path),
 			zap.String("query", query),
@@ -33,6 +34,7 @@ func Logger() gin.HandlerFunc {
 func Recovery() gin.HandlerFunc {
 	return gin.CustomRecoveryWithWriter(nil, func(c *gin.Context, recovered interface{}) {
 		common.L().Error("panic 恢复",
+			zap.String("request_id", c.GetString("request_id")),
 			zap.Any("error", recovered),
 			zap.String("path", c.Request.URL.Path),
 		)

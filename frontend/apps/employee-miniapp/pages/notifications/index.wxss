@@ -1,0 +1,2 @@
+.notification-message { margin-top: 18rpx; color: #163d48; }
+.realtime-state { margin-top: 12rpx; color: #39736f; font-size: 22rpx; }

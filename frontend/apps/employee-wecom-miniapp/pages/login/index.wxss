@@ -1,0 +1,2 @@
+.login-page { padding-bottom: 80rpx; }
+.divider { margin-top: 32rpx; color: #78918f; font-size: 24rpx; text-align: center; }

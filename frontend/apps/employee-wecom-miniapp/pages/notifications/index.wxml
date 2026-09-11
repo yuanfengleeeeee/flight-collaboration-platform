@@ -1,0 +1,17 @@
+<view class="page-shell task-page">
+  <view class="eyebrow">WECOM / NOTIFICATIONS</view>
+  <view class="title">通知</view>
+  <view class="muted">通知来自 Edge Projection；实时连接只负责提醒刷新，已读状态会持久化。</view>
+  <button class="button secondary refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="reload">刷新通知</button>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{loading}}" class="card muted">正在读取通知…</view>
+  <view wx:if="{{!loading && items.length === 0}}" class="card muted">暂无通知</view>
+  <view wx:for="{{items}}" wx:key="public_id" class="card notification-card">
+    <view class="task-card__top"><view class="task-card__title">{{item.title}}</view><view class="status">{{item.status === 'unread' ? '未读' : '已读'}}</view></view>
+    <view class="muted notification-message">{{item.message}}</view>
+    <view class="task-card__meta">{{item.updated_at}}</view>
+    <button wx:if="{{item.status === 'unread'}}" class="button secondary" data-id="{{item.public_id}}" loading="{{reading === item.public_id}}" disabled="{{reading}}" bindtap="markRead">标记已读</button>
+  </view>
+  <view wx:if="{{total > 0}}" class="pagination"><button size="mini" disabled="{{loading || page <= 1}}" bindtap="previousPage">上一页</button><text>第 {{page}} 页 / 共 {{total}} 条</text><button size="mini" disabled="{{loading || page * pageSize >= total}}" bindtap="nextPage">下一页</button></view>
+  <view class="bottom-nav"><navigator class="bottom-nav__item" url="/pages/tasks/index">任务</navigator><navigator class="bottom-nav__item active" url="/pages/notifications/index">通知</navigator><navigator class="bottom-nav__item" url="/pages/history/index">历史</navigator><navigator class="bottom-nav__item" url="/pages/exceptions/index">异常</navigator><navigator class="bottom-nav__item" url="/pages/account/index">账号</navigator></view>
+</view>

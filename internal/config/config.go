@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -63,17 +64,68 @@ type LogConfig struct {
 
 // Load 加载配置
 func Load(path string) (*Config, error) {
-	viper.SetConfigFile(path)
-	viper.AutomaticEnv()
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetEnvPrefix("FLIGHT")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+	for _, key := range []string{
+		"server.port", "server.mode",
+		"mysql.host", "mysql.port", "mysql.username", "mysql.password", "mysql.database",
+		"mysql.max_idle_conns", "mysql.max_open_conns", "mysql.conn_max_lifetime",
+		"redis.host", "redis.port", "redis.password", "redis.db",
+		"jwt.secret", "jwt.expire_hours", "jwt.issuer",
+		"log.level", "log.encoding", "log.output",
+	} {
+		if err := v.BindEnv(key); err != nil {
+			return nil, fmt.Errorf("绑定环境变量失败: %s: %w", key, err)
+		}
+	}
 
-	if err := viper.ReadInConfig(); err != nil {
+	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("读取配置失败: %w", err)
 	}
 
 	var cfg Config
-	if err := viper.Unmarshal(&cfg); err != nil {
+	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("配置校验失败: %w", err)
 	}
 
 	return &cfg, nil
+}
+
+// Validate 校验启动所需的基础配置，不检查外部依赖是否在线。
+func (c Config) Validate() error {
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return fmt.Errorf("server.port 必须在 1-65535 之间")
+	}
+	mode := strings.ToLower(c.Server.Mode)
+	if mode != "debug" && mode != "release" && mode != "test" {
+		return fmt.Errorf("server.mode 必须是 debug、release 或 test")
+	}
+	if c.MySQL.Host == "" || c.MySQL.Port < 1 || c.MySQL.Port > 65535 || c.MySQL.Username == "" || c.MySQL.Database == "" {
+		return fmt.Errorf("mysql.host、mysql.port、mysql.username、mysql.database 必须有效")
+	}
+	if c.Redis.Host == "" || c.Redis.Port < 1 || c.Redis.Port > 65535 {
+		return fmt.Errorf("redis.host 和 redis.port 必须有效")
+	}
+	if c.JWT.Secret == "" || c.JWT.Issuer == "" || c.JWT.ExpireHours <= 0 {
+		return fmt.Errorf("jwt.secret、jwt.issuer、jwt.expire_hours 必须有效")
+	}
+	if mode == "release" && (c.JWT.Secret == "change-me-in-production" || len(c.JWT.Secret) < 16) {
+		return fmt.Errorf("release 模式必须使用至少 16 位非默认 JWT secret")
+	}
+	if c.Log.Level != "debug" && c.Log.Level != "info" && c.Log.Level != "warn" && c.Log.Level != "error" {
+		return fmt.Errorf("log.level 必须是 debug、info、warn 或 error")
+	}
+	if c.Log.Encoding != "json" && c.Log.Encoding != "console" {
+		return fmt.Errorf("log.encoding 必须是 json 或 console")
+	}
+	if c.Log.Output == "" {
+		return fmt.Errorf("log.output 不能为空")
+	}
+	return nil
 }

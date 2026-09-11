@@ -1,0 +1,1 @@
+DROP TABLE flight_source_reconciliation;

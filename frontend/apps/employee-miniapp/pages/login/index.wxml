@@ -1,0 +1,15 @@
+<view class="page-shell login-page">
+  <view class="eyebrow">EMPLOYEE / ACCESS</view>
+  <view class="title">进入协同工作台</view>
+  <view class="muted">这是个人微信员工入口。首次使用需要项目员工工号和密码完成绑定；企业微信请使用企业微信小程序。</view>
+
+  <view class="card">
+    <button class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="quickLogin">{{loading ? '正在验证…' : '个人微信快捷登录'}}</button>
+    <view class="divider">首次绑定 / 恢复登录</view>
+    <input class="input" type="text" value="{{employeeNo}}" data-field="employeeNo" bindinput="inputValue" placeholder="工号" />
+    <input class="input" password value="{{password}}" data-field="password" bindinput="inputValue" placeholder="首次绑定请输入密码" />
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <button class="button secondary" loading="{{loading}}" disabled="{{loading}}" bindtap="login">工号密码登录并绑定个人微信</button>
+    <button class="button secondary" loading="{{passwordLoading}}" disabled="{{passwordLoading}}" bindtap="passwordOnlyLogin">仅使用工号密码登录</button>
+  </view>
+</view>

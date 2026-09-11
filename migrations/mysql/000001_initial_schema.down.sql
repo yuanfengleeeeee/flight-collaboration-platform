@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS `prediction_interface`;
+DROP TABLE IF EXISTS `resource_statistics`;
+DROP TABLE IF EXISTS `event_statistics`;
+DROP TABLE IF EXISTS `flight_operation_statistics`;
+DROP TABLE IF EXISTS `rule`;
+DROP TABLE IF EXISTS `event`;
+DROP TABLE IF EXISTS `task_assignment`;
+DROP TABLE IF EXISTS `task_instance`;
+DROP TABLE IF EXISTS `task_template`;
+DROP TABLE IF EXISTS `personnel_status`;
+DROP TABLE IF EXISTS `user_position`;
+DROP TABLE IF EXISTS `position`;
+DROP TABLE IF EXISTS `user`;
+DROP TABLE IF EXISTS `flight`;

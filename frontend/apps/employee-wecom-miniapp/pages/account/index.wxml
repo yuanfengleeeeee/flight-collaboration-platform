@@ -1,0 +1,6 @@
+<view class="page-shell account-page">
+  <view class="eyebrow">WECOM / ACCOUNT</view>
+  <view class="title">我的账号</view>
+  <view class="card"><view class="muted">当前登录的是项目员工账号。企业微信身份只作为绑定入口，项目员工库中的账号和分工关系才是业务依据。</view><button class="button danger" loading="{{loading}}" bindtap="logout">退出当前设备</button></view>
+  <view class="bottom-nav"><navigator class="bottom-nav__item" url="/pages/tasks/index">任务</navigator><navigator class="bottom-nav__item" url="/pages/notifications/index">通知</navigator><navigator class="bottom-nav__item" url="/pages/history/index">历史</navigator><navigator class="bottom-nav__item" url="/pages/exceptions/index">异常</navigator><navigator class="bottom-nav__item active" url="/pages/account/index">账号</navigator></view>
+</view>

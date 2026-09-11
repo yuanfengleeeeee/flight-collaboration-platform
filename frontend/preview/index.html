@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#102431" />
+    <meta name="description" content="航空客运地面代理协同平台前端 F0 Mock 页面预览" />
+    <title>航空客运地面代理协同 · 前端页面预览</title>
+    <link rel="stylesheet" href="./preview.css" />
+    <script src="./preview.js" defer></script>
+  </head>
+  <body class="preview-index">
+    <div class="preview-frame">
+      <header class="preview-toolbar">
+        <div class="preview-title">
+          <span class="preview-kicker">FRONTEND F0 / EXPLORATION</span>
+          <strong>航空客运地面代理协同</strong>
+        </div>
+        <div class="preview-note">独立页面入口 · 仅用于结构确认 · 不连接真实 API</div>
+      </header>
+
+      <main class="preview-home">
+        <section class="preview-hero">
+          <span class="eyebrow">页面地图 / PAGE MAP</span>
+          <h1>先把每一种工作，<em>放回它自己的页面。</em></h1>
+          <p>管理端、员工端和登录入口已经拆开。下面的页面只呈现已确认的导航与权限骨架，尚未接入真实业务数据。</p>
+          <div class="preview-hero-rule"><i></i><span>CORE / EDGE / STAFF</span><i></i></div>
+        </section>
+
+        <section class="preview-choice-grid" aria-label="预览页面入口">
+          <a class="preview-choice preview-choice-admin" href="login-admin.html">
+            <span class="choice-index">01</span><span class="choice-kicker">ADMIN WEB · CORE</span>
+            <strong>管理端</strong><p>主任全量视图、队长 Scope 视图、完整工作区与任务详情。</p><span class="choice-link">进入管理端 →</span>
+          </a>
+          <a class="preview-choice preview-choice-employee" href="login-employee.html">
+            <span class="choice-index">02</span><span class="choice-kicker">EMPLOYEE · EDGE</span>
+            <strong>员工端</strong><p>员工 Web/小程序共用的任务、通知、异常、历史和账号入口。</p><span class="choice-link">进入员工登录 →</span>
+          </a>
+          <a class="preview-choice preview-choice-map" href="admin.html?section=overview">
+            <span class="choice-index">03</span><span class="choice-kicker">WORKSPACE MAP</span>
+            <strong>管理端工作区</strong><p>直接查看完整导航骨架。暂时没有内容的模块会展示对应空态。</p><span class="choice-link">查看工作区 →</span>
+          </a>
+        </section>
+
+        <p class="preview-disclaimer">探索稿说明：视觉美化、真实字段、接口状态和完整业务内容将在 F0 页面与权限评审后继续迭代。</p>
+      </main>
+    </div>
+  </body>
+</html>
